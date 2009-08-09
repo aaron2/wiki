@@ -448,7 +448,7 @@ proc longestCommonSubsequence { sequence1 sequence2 } {
                  set newc [list $i $j [lindex $K $s]]
                  lset K $r $c
                  set c $newc
-                 set r [expr $s+1]
+                 set r [expr {$s+1}]
                  if { $s >= $k } {
                      lappend K [lindex $K end]
                      incr k
@@ -596,8 +596,13 @@ proc http_auth {entity action {target {}}} {
     switch -glob -- $entity:$action {
         wiki:config { set reqlevel 30 }
         user:password {
-            if {$user == "anonymous" || $user != $target} { no_auth }
-            set reqlevel 10
+            if {$user != $target} {
+                set reqlevel 25
+                set tlev [db onecolumn {select level from users where user=$target}]
+                if {$tlev != "" && $tlev >= 30} { set reqlevel 30 }
+            } else {
+                set reqlevel 10
+            }
         }
         user:* {
             set reqlevel 25
@@ -680,7 +685,7 @@ proc do_login {} {
     set pass $input(password)
     set ip $::env(REMOTE_ADDR)
     if {![db exists {select user from users where user=$user and password=password($pass) and password<>''}]} {
-        location wiki:login?message=login%20failed[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
+        location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
         return
     }
 
@@ -733,15 +738,17 @@ proc login {} {
         puts "<span style=\"color:red;\">[filter_html $input(message)]</span><br><br>"
     }
     if {[info exists ::request(REMOTE_USER)]} {
-        puts "<span style=\"color:red;\">You are already logged in as user &quot;$::request(REMOTE_USER)&quot;</span><br><br>"
+        puts "You are already logged in as user &quot;$::request(REMOTE_USER)&quot;<br>You may switch users by logging in again below.<br>If this is the correct user then it is likely you do not have sufficient privileges for the action you were trying to perform<br>"
     }
     puts "<form action=\"[myself]/login\" method=post>
          <table style=\"border: 0px;\"><tr><td style=\"border: 0px;\">Username:</td>
-         <td style=\"border: 0px;\"><input name=username></td></tr>
+         <td style=\"border: 0px;\"><input name=username id=username></td></tr>
          <tr><td style=\"border: 0px;\">Password:</td>
          <td style=\"border: 0px;\"><input type=password name=password></td></tr>"
     if {[info exists input(href)]} { puts "<input type=hidden name=href value=\"$input(href)\">" }
-    puts "<tr><td colspan=2 align=center style=\"border: 0px;\"><input type=submit value=\"Log In\"></td></tr></table></form>"
+    puts {<tr><td colspan=2 align=center style="border: 0px;"><input type=submit value="Log In"></td></tr></table></form>}
+    puts {<script>document.getElementById('username').focus();</script>}
+    puts {</body></html>}
 }
 
 # display a node
@@ -760,6 +767,9 @@ proc showpage {id} {
     set time [time {set done [parse_dynamic $id $page]}]
     puts $done
     puts "<!-- dynamic parse time: $time -->"
+    db eval {select content from nodes,tags where tags.name='wiki:script' and tags.node=nodes.id order by nodes.name} {
+        puts "<script>\n$content\n</script>\n"
+    }
     puts "</body></html>"
 }
 
@@ -1652,11 +1662,7 @@ proc savepage {id} {
     if {$id != "new"} {
         db eval {select content,protect,strftime('%s',modified) as modified from nodes where id=$id} {}
         if {![info exists content]} { http_error 404 "no such node" }
-        if {$input(content) == "delete"} {
-            http_auth node delete $id
-        } else {
-            set level [http_auth node edit $id]
-        }
+        set level [http_auth node [expr {$input(content) == "delete" ? "delete" : "edit"}] $id]
         if {$input(editstarted) < $modified} {
             db eval {select tf(modified) as modified,modified_by from nodes where id=$id} {}
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
@@ -1684,7 +1690,7 @@ proc savepage {id} {
         if {![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $level }
     }
 
-    if {[catch {set time [time {set parsed [parse_static $id $input(content)]}]   } err]} {
+    if {[catch { set time [time { set parsed [parse_static $id $input(content)] }] } err]} {
         http_error 500 $::errorInfo
     }
     set strip "$input(name) [striphtml $parsed]"
