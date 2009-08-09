@@ -132,14 +132,13 @@ proc editpage {id args} {
     # this js handles resizing the textarea to fit the browser vertically
     puts {<script language="javascript">
           function maxSize() {
-              var content = document.getElementsByName('content');
-              var lineHeight = content[0].clientHeight / content[0].rows;
+              var c = document.getElementById('content');
+              var lineHeight = c.clientHeight / c.rows;
               var diff = document.body.scrollHeight - document.body.clientHeight;
-              if (diff != 0) { content[0].rows = content[0].rows - (diff / lineHeight); }
+              if (diff != 0) { c.rows -= diff / lineHeight; }
               else {
-                  content[0].rows = (document.body.clientHeight / lineHeight);
-                  var diff = document.body.scrollHeight - document.body.clientHeight;
-                  content[0].rows = content[0].rows - (diff / lineHeight);
+                  c.rows = document.body.clientHeight / lineHeight;
+                  c.rows -= (document.body.scrollHeight - document.body.clientHeight) / lineHeight;
               }
           }
           window.onresize = maxSize;
@@ -147,7 +146,7 @@ proc editpage {id args} {
           </script>}
     puts "<form name=form action=\"$action\" method=post>
           <input name=name value=\"$name\" style=\"width: 100%;\"><br><br>
-          <textarea name=content rows=30 style=\"width: 100%; margin-bottom: .7em;\">$content</textarea><br>
+          <textarea name=content id=content rows=30 style=\"width: 100%; margin-bottom: .7em;\">$content</textarea><br>
           <input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel onclick=\"javascript:$back;\" style=\"margin-left: 2em;\">
           <input type=hidden name=editstarted value=[clock seconds]>
