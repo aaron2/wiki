@@ -495,10 +495,10 @@ proc format_diff {diff orig} {
 }
 
 proc create_history_entry {id} {
-    db eval {select content as lastfull from history where original=$id and type='full' order by id desc limit 1} {}
     db eval {select content as new,modified_by from nodes where id=$id} {}
     set type full
     set content $new
+    #db eval {select content as lastfull from history where original=$id and type='full' order by id desc limit 1} {}
     #if {[info exists lastfull]} {
     #    set diff [diff $new $lastfull]
     #    if {[llength $diff] <= 45} {
@@ -951,6 +951,7 @@ proc showfile {id} {
 # input: tag name
 # returns: nothing
 proc wikitag {name} {
+    set name [string map {' ""} $name]
     db eval "select id from nodes,tags where tags.name='wiki:$name' and tags.node=nodes.id order by nodes.modified desc limit 1" {}
     if {[info exists id]} {
         showpage $id
@@ -1300,6 +1301,12 @@ proc static_variable {var} {
                 return "<div class=toc>\n[static_lists [join $headings \n]]</div>\n"
             }
         }
+        BLUE -
+        RED -
+        GREEN -
+        YELLOW -
+        BLACK { return "<span style=\"color: [string tolower $var];\">" }
+        ENDCOLOR { return "</span>" }
         default { return %$var% }
     }
 }
@@ -1717,7 +1724,8 @@ proc showpagebyname {name} {
     if {$id == ""} {
         editpage new $name
     } else {
-        location node:$id
+        #location node:$id
+        showpage $id
     }
 }
 
@@ -1843,4 +1851,4 @@ if {[info exists env(GATEWAY_INTERFACE)]} {
 }]
 
 set t [lindex $t 0]
-exec echo [file tail $::env(PATH_TRANSLATED)] [expr {double($t) / 1000}] >> log
+#exec echo [file tail $::env(PATH_TRANSLATED)] [expr {double($t) / 1000}] >> log
