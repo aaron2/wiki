@@ -390,15 +390,16 @@ proc showdiff {diff} {
         db eval {select content from nodes where id=$node} {}
         puts "[link node:$node "Revision [expr {[llength $revs] + 1}]"] (current)<br>"
     } else {
-        db eval {select content,tf(created) as created,created_by from history where id=$from} {}
-        set content [db onecolumn {select content from history where id=$from}]
+        db eval {select tf(created) as created,created_by from history where id=$from} {}
+        set content [get_history_content $from]
         puts "[link viewhistory:$from "Revision [expr {[lsearch $revs $from] + 1}]"] saved by $created_by on $created<br>"
     }
-    db eval {select content as content2,tf(created) as created,created_by from history where id=$to} {}
+    db eval {select tf(created) as created,created_by from history where id=$to} {}
+    set content2 [get_history_content $to]
     puts "[link viewhistory:$to "Revision [expr {[lsearch $revs $to] + 1}]"] saved by $created_by on $created<br>\n<hr>"
     set content [filter_html $content]
     set content2 [filter_html $content2]
-    diff [split $content \n] [split $content2 \n]
+    puts "<pre>[format_diff [diff $content $content2] $content2]</pre>"
     puts "<br><hr>"
 }
 
@@ -467,37 +468,81 @@ proc longestCommonSubsequence { sequence1 sequence2 } {
      return [list $seta $setb]
 }
 
-# used only by [longestCommonSubsequence]
 # outputs the changed lines with the styles applied
+proc format_diff {diff orig} {
+    set orig [split $orig \n]
+    set removed [lindex $diff 0]
+    set aspan "<span style=\"background: #88ee88;\">"
+    set rspan "<span style=\"background: #ee8888;\">"
+    foreach x $removed {
+        set orig [lreplace $orig $x $x "$rspan[lindex $orig $x]</span>"]
+    }
+    foreach {idx text} [lindex $diff 1] {
+        foreach x $removed {
+            if {$x > $idx} { break }
+            incr idx
+        }
+        set orig [linsert $orig $idx "$aspan$text</span>"]
+    }
+    return [join $orig \n]
+}
+
+proc create_history_entry {id} {
+    db eval {select content as lastfull from history where original=$id and type='full' order by id desc limit 1} {}
+    db eval {select content as new,modified_by from nodes where id=$id} {}
+    set type full
+    set content $new
+    #if {[info exists lastfull]} {
+    #    set diff [diff $new $lastfull]
+    #    if {[llength $diff] <= 45} {
+    #        set type diff
+    #        set content $diff
+    #    }
+    #    #elseif {[db eval {select count(type) from (select type from history where original=$id order by created desc limit 7) where type='full'}] == 0}
+    #}
+    db eval {insert into history (original,type,content,created,created_by) values($id,$type,$content,datetime('now'),$modified_by)}
+}
+
+proc get_history_content {id} {
+    #set diffs [db eval {select content from (select id,type,content from history where original=(select original from history where id=$id)) where id<=$id and id>=(select id from history where original=(select original from history where id=$id) and type='full' and id <=$id order by id desc limit 1)}]
+    db eval {select content,type from history where id=$id} {}
+    if {$type == "full"} {
+        return $content
+    }
+    db eval {select content as lastfull from history where original=(select original from history where id=$id) and type='full' and id<=$id order by id desc limit 1} {}
+
+    set lastfull [split $lastfull \n]
+    foreach x [lreverse [lindex $content 0]] {
+        set lastfull [lreplace $lastfull $x $x]
+    }
+    foreach {idx text} [lindex $content 1] {
+        set lastfull [linsert $lastfull $idx $text]
+    }
+    return [join $lastfull \n]
+}
+
 proc diff {lines1 lines2} {
-    set added "<span style=\"background: #88ee88;\">"
-    set removed "<span style=\"background: #ee8888;\">"
-    set unchanged "<span>"
+    set lines1 [split $lines1 \n]
+    set lines2 [split $lines2 \n]
+    set added [list]
+    set removed [list]
     set i 0
     set j 0
     foreach { x1 x2 } [longestCommonSubsequence $lines1 $lines2] {
         foreach p $x1 q $x2 {
             while { $i < $p } {
-                puts "$added[lindex $lines1 $i]</span><br>"
+                lappend added $i [lindex $lines1 $i]
                 incr i
             }
             while { $j < $q } {
-                puts "$removed[lindex $lines2 $j]</span><br>"
+                lappend removed $j
                 incr j
             }
-            puts "$unchanged[lindex $lines1 $i]</span><br>"
             incr i
             incr j
         }
     }
-    while { $i < [llength $lines1] } {
-        puts "$added[lindex $lines1 $i]</span><br>"
-        incr i
-    }
-    while { $j < [llength $lines2] } {
-        puts "$removed[lindex $lines2 $j]</span><br>"
-        incr j
-    }
+    return [list $removed $added]
 }
 
 # authenticate and authorize a request
@@ -820,7 +865,7 @@ proc showhistory {nodeid} {
     puts "<tr><td align=center>[expr {$i + 1}]</td><td align=center>[link node:$nodeid current]</td><td>$modified_by</td>"
     set nextlines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
     set nextid [db eval {select id from history where original=$nodeid order by created desc limit 1}]
-    db eval {select id,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
+    db eval {select id,type,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
         set lines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
         if {$nextid == $id} {
             puts "<td align=center>[expr {$nextlines - $lines}]</td><td align=right>[link diff:curr:$id prev]</td></tr>"
@@ -836,7 +881,7 @@ proc showhistory {nodeid} {
 }
 
 proc viewhistory {id} {
-    db eval {select original,content,tf(created) as created from history where id=$id} {}
+    db eval {select original,tf(created) as created from history where id=$id} {}
     if {![info exists original]} { http_error 404 "no such node" }
     http_auth node view $original
     http_header
@@ -848,7 +893,7 @@ proc viewhistory {id} {
     } else {
         puts "Contents of &quot;[link node:$original $name]&quot; until $created<br><hr>"
     }
-    set content [string map {& &amp;} $content]
+    set content [string map {& &amp;} [get_history_content $id]]
     puts "<pre>[filter_html $content]</pre><hr>"
 }
 
@@ -1612,7 +1657,7 @@ proc savepage {id} {
         }
         db eval {delete from tags where node=$id}
         db eval {delete from links where node=$id}
-        db eval {insert into history (original,content,created,created_by) select id,content,datetime('now'),modified_by from nodes where id=$id}
+        create_history_entry $id
         if {$input(content) == "delete"} {
             db eval {delete from nodes where id=$id}
             fts eval {delete from search where id=$id}
