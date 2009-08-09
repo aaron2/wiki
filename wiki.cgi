@@ -807,6 +807,7 @@ proc do_search {{q {}}} {
     html_head "Search results"
 
     set level [http_auth auth verify]
+    set matches {}
 
     # for tag searches need to remove boolean operators and negated terms to avoid suprious results,
     # and single quotes to prevent sql injection
@@ -815,28 +816,34 @@ proc do_search {{q {}}} {
         if {$x == "" || $x == "OR" || [string match -* $x]} { continue }
         lappend tagterms '[string map {' ""} [string tolower $x]]'
     }
-
+    set numterms [llength $tagterms]
+ 
     puts "<h1>Search results</h1><br>"
     puts "Searched for \"[filter_html [join $input(string)]]\"<br>"
     puts "<h3>Tag results</h3>"
     db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and nodes.protect<=$level group by tags.node order by count(tags.name) desc" {
-        set tags [db eval {select name from tags where node=$id}]
-        puts "[link node:${tags.node} ${nodes.name}]&nbsp;&nbsp;&nbsp<span class=tags>("
-        foreach x $tags { puts -nonewline "[link tag:$x $x] " }
+        if {$numterms == $count(tags.name)} { lappend matches $id }
+        puts "[link node:${tags.node} ${nodes.name}]&nbsp;&nbsp;&nbsp;<span class=tags>("
+        db eval {select name from tags where node=$id} {
+            puts -nonewline "[link tag:$name $name] "
+        }
         puts ")</span><br>"
     }
 
     puts "<br><h3>Full text results</h3>"
     fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and protect<=$level} {
-        set tags [db eval {select name from tags where node=$id}]
 
-        puts "<b>[link node:$id $name]</b><br>"
-        if {$tags != ""} {
-            puts -nonewline "<span class=tags>"
+        puts "[link node:$id $name]"
+        if {[set tags [db eval {select name from tags where node=$id}]] != ""} {
+            puts "&nbsp;&nbsp;&nbsp;<span class=tags>("
             foreach x $tags { puts -nonewline "[link tag:$x $x] " }
-            puts -nonewline "</span><br>"
+            puts -nonewline ")</span>"
         }
-        puts "$snippet<br><br>"
+        puts "<br>$snippet<br><br>"
+        lappend matches $id
+    }
+    if {[llength $matches] == 1} {
+        # do something here
     }
 }
 
