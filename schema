@@ -1,0 +1,68 @@
+CREATE TABLE nodes (
+id integer primary key autoincrement,
+name varchar,
+content text,
+parsed text,
+protect integer,
+viewed datetime,
+modified datetime,
+modified_by varchar,
+created datetime
+);
+
+CREATE TABLE files (
+id integer primary key autoincrement,
+name varchar,
+original_name varchar,
+filename varchar,
+modified datetime,
+modified_by varchar,
+created datetime
+);
+
+CREATE TABLE tags (
+name varchar not null,
+node integer not null,
+primary key(name,node),
+foreign key (node) references nodes (id)
+);
+
+CREATE TABLE history (
+id integer primary key autoincrement,
+original integer not null,
+type varchar,
+content text,
+created datetime,
+created_by varchar
+);
+
+CREATE TABLE links (
+node integer,
+type varchar,
+target integer,
+primary key (node,type,target),
+foreign key (node,target) references nodes (id,id)
+);
+
+CREATE TABLE settings (
+name varchar primary key,
+val varchar
+);
+
+CREATE TABLE users (
+user varchar primary key,
+ip varchar,
+password varchar,
+name varchar,
+email varchar,
+created datetime,
+level integer
+);
+
+CREATE TABLE cookies (
+user varchar,
+ip varchar,
+key varchar,
+created datetime,
+expires datetime
+);
