@@ -817,7 +817,7 @@ proc do_search {{q {}}} {
         lappend tagterms '[string map {' ""} [string tolower $x]]'
     }
     set numterms [llength $tagterms]
- 
+
     puts "<h1>Search results</h1><br>"
     puts "Searched for \"[filter_html [join $input(string)]]\"<br>"
     puts "<h3>Tag results</h3>"
@@ -1211,46 +1211,71 @@ proc parse_static {id data} {
         lappend saved [string range $data $x $y]
         set data [string replace $data $x $y @PASS@]
     }
-    if {$::settings(FILTER_HTML)} {
-        set data [filter_white_html $data]
+    #eval lappend indices [regexp -all -inline -indices {<script.*?</script>} $data]
+    #set indices [lsort -decreasing -index 0 $indices]
+    foreach x $indices {
+        set y [lindex $x 1]
+        set x [lindex $x 0]
+        lappend saved [string range $data $x $y]
+        set data [string replace $data $x $y @PASS@]
     }
 
     set data [string map {[ &#91; \{ &#123; \} &#125; $ &#36;} $data]
+
     # link:(name)
     set data [regsub -all {\m([a-z]{3,7}):\(([^\)]+)\)} $data "\[static_call $id \{\\1\} \{\\2\}]"]
+
     # link:id
     set data [regsub -all {\m([a-z]{3,7}):([[:digit:]]+)} $data "\[static_call $id \{\\1\} \{\\2\}]"]
+
     # proto:// external links
-    set data [regsub -all {(\([^\(\)]+\):)?[a-z]{3,7}://[^	 \"\n<]+} $data {[static_http {\0}]}]
-    #set data [regsub -all {(?=[\s\|^])(\([^\(\)]+\):)?[a-z]{3,7}://[^	 \"\n<]+} $data {[static_http {\0}]}]
+    #set data [regsub -all           {(\([^\(\)]+\):)?[a-z]{3,7}://[^       \"\n<]+} $data {[static_http {\0}]}]
+    set data [regsub -all {([\s\|^])((\([^\(\)]+\):)?[a-z]{3,7}://[^	 \"\n<]+)} $data {\1[static_http {\2}]}]
+
     # pre and ul,ol lists
-    set data [regsub -all {(\n  +[^\n]*){1,}} $data "\n\[static_lists \{\\0\}\]"]
+    #set data [regsub -all {((\n|\A)  +[^\n]*){1,}} $data "\n\[static_lists \{\\0\}\]"]
+    set data [regsub -all {((\n|\A)  +[^\n]*){1,}} $data "\n\[static_lists \{\\0\}\]"]
+
     # |tables|
     #set data [regsub -all {(\n\|[^\n]+\|){1,}} $data {[static_table {\0}]}]
     set data [regsub -all -line {(^\|.+\|($|\n))+} $data {[static_table {\0}]}]
+
     # ?option: vals
     set data [regsub -all -line {^\?([a-z]{3,10}):(.*)$} $data "\[static_options $id \{\\1\} \{\\2\}]"]
+
     # hr
     set data [regsub -all -line {^----*$} $data "<hr>"]
+
     # _italic_
     #set data [regsub -all {([^\w])_([^ _][^_]*[^ _])_([^\w])} $data {\1<i>\2</i>\3}]
-    set data [regsub -all {_(?!\s)([^_]+)_(?![[:alnum:]])} $data {<i>\1</i>}]
+    #set data [regsub -all {_(?!\s)([^_]*[^_ ])_(?![[:alnum:]])} $data {<i>\1</i>}]
+    set data [regsub -all {\m_(?!\s)([^_]*[^_ ])_(?![[:alnum:]])} $data {<i>\1</i>}]
+
     # *bold*
     #set data [regsub -all {([^\w])\*([^ \*][^\*]*[^ \*])\*([^\w])} $data {\1<b>\2</b>\3}]
-    set data [regsub -all {\*(?!\s)([^*]+)\*(?![[:alnum:]])} $data {<b>\1</b>}]
+    #set data [regsub -all  {\*(?!\s)([^*]*[^_ ])\*(?![[:alnum:]])} $data {<b>\1</b>}]
+    set data [regsub -all -linestop  {\Y\*(?!\s\")([^\*]*[^\* ])\*(?![[:graph:]])} $data {<b>\1</b>}]
+
     # =fixed=
     #set data [regsub -all {([\s\*\+_])=([^ =][^=]*[^ =])=([\s\*_\+])} $data {\1<span class=fixed>\2</span>\3}]
     #set data [regsub -all {=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class =fixed>\1</span>}]
-    set data [regsub -all {(?=[\s\*\+_^])=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class=fixed>\1</span>}]
+    #set data [regsub -all {(?=[\s\*\+_^])=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class=fixed>\1</span>}]
+    #set data [regsub -all -linestop {(?=[\s\^])=(?!\s\")([^=]*[^= ])=(?![[:graph:]])} $data {<span class=fixed>\1</span>}]
+    set data [regsub -all -linestop  {\Y=(?!\s\")([^=]*[^= ])=(?![[:graph:]])} $data {<span class=fixed>\1</span>}]
+
     # +++headings+
     set data [regsub -all -line {^\+{1,5}.+\+$} $data {[static_heading {\0}]}]
+
     # +paragraph\n\n
     #set data [regsub -all {\n\+([[:alnum:]].*?)\n\n} $data "\n<p>\\1</p>"]
     set data [regsub -all {(?w)^\+(.*?)(?=\n\n|\Z)(?:\n|\Z)} $data {<p>\1</p>}]
+
     # %variables%
     set data [regsub -all {%([A-Z]{3,10})%} $data {[static_variable {\1}]}]
+
     # line breaks
     set data [string map {\n\n\n\n <br><br><br>\n \n\n\n <br><br>\n \n\n <br>\n} $data]
+
 
     set data [subst -nobackslashes -novariables $data]
 
@@ -1266,6 +1291,9 @@ proc parse_static {id data} {
             set data [string replace $data $x $y $pass]
             incr i
         }
+    }
+    if {$::settings(FILTER_HTML)} {
+        set data [filter_white_html $data]
     }
     return $data
 }
@@ -1336,7 +1364,7 @@ proc static_variable {var} {
 proc static_heading {data} {
     set size [expr {[string length $data] - [string length [string trimleft $data +]]}]
     set data [string trim $data +]
-    return "<a name=[string map {" " _} $data]><h$size>$data</h$size></a>\n"
+    return "<a name=[string map {" " _} [string trim $data]]><h$size>$data</h$size></a>\n"
 }
 
 proc static_options {id opt data} {
@@ -1344,7 +1372,11 @@ proc static_options {id opt data} {
         tags {
             foreach x [split $data] {
                 if {$x == ""} { continue }
-                db eval {insert or ignore into tags (name,node) values(lower($x),$id)}
+                if {[string match wiki:* $x]} {
+                    upvar 2 level level
+                    #if {$level < 25} { continue }
+                }
+                #db eval {insert or ignore into tags (name,node) values(lower($x),$id)}
             }
             return
         }
@@ -1369,7 +1401,8 @@ proc static_http {data} {
 
 proc static_lists {data} {
     set data [subst [string map {\" \\\" \\ \\\\} $data]]
-    set data [lrange [split $data \n] 1 end]
+    set data [split $data \n]
+    if {[lindex $data 0] == ""} { set data [lrange $data 1 end] }
 
     if {![string match {[*1]*} [string trimleft [lindex $data 0]]]} {
         return "<pre>\n[join $data \n]\n</pre>"
@@ -1402,6 +1435,7 @@ proc static_lists {data} {
 
 proc static_call {id cmd data} {
     switch -exact -- $cmd {
+        node -
         link {
             if {[string is integer $data]} {
                 db eval {insert or ignore into links (node,type,target) values($id,'node',$data)}
@@ -1414,7 +1448,7 @@ proc static_call {id cmd data} {
                     return [link $data $data]
                 }
             } elseif {[regexp {^([[:alnum:] ]+):(.*:.*)} $data -> name href]} {
-                return "<a href=\"$href\">$name</a>"
+                return "<a href=\"[join [lrange $s 1 end] :]\">[lindex $s 0]</a>"
             } else {
                 return "<a href=\"$data\">$data</a>"
             }
