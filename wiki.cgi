@@ -1093,7 +1093,7 @@ proc upload_post {id} {
         db eval {commit transaction}
         location file:[db last_insert_rowid]
     } else {
-        db eval {update files set modified=datetime('now'),name=$name}
+        db eval {update files set modified=datetime('now'),name=$name where id=$id}
         db eval {commit transaction}
         location file:$id
     }
@@ -1117,7 +1117,7 @@ proc html_head {title} {
     puts "<head>\n<title>$title</title>"
     db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {}
     if {[info exists parsed]} {
-        #set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
+        set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
         puts "<style>\n$parsed\n</style>\n"
     }
     puts "</head><body>"
@@ -1147,6 +1147,7 @@ proc parse_static {id data} {
     set data [regsub -all {\m([a-z]{3,7}):([[:digit:]]+)} $data "\[static_call $id \{\\1\} \{\\2\}]"]
     # proto:// external links
     set data [regsub -all {(\([^\(\)]+\):)?[a-z]{3,7}://[^	 \"\n<]+} $data {[static_http {\0}]}]
+    #set data [regsub -all {(?=[\s\|^])(\([^\(\)]+\):)?[a-z]{3,7}://[^	 \"\n<]+} $data {[static_http {\0}]}]
     # pre and ul,ol lists
     set data [regsub -all {(\n  +[^\n]*){1,}} $data "\n\[static_lists \{\\0\}\]"]
     # |tables|
@@ -1163,8 +1164,9 @@ proc parse_static {id data} {
     #set data [regsub -all {([^\w])\*([^ \*][^\*]*[^ \*])\*([^\w])} $data {\1<b>\2</b>\3}]
     set data [regsub -all {\*(?!\s)([^*]+)\*(?![[:alnum:]])} $data {<b>\1</b>}]
     # =fixed=
-    #set data [regsub -all {([^\w])=([^ =][^=]*[^ =])=([^\w])} $data {\1<span class=fixed>\2</span>\3}]
-    #set data [regsub -all {=(?!\s)([^=]+)=(?![[:alnum:]\"])} $data {<span class=fixed>\1</span>}]
+    #set data [regsub -all {([\s\*\+_])=([^ =][^=]*[^ =])=([\s\*_\+])} $data {\1<span class=fixed>\2</span>\3}]
+    #set data [regsub -all {=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class =fixed>\1</span>}]
+    set data [regsub -all {(?=[\s\*\+_^])=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class=fixed>\1</span>}]
     # +++headings+
     set data [regsub -all -line {^\+{1,5}.+\+$} $data {[static_heading {\0}]}]
     # +paragraph\n\n
