@@ -960,6 +960,19 @@ proc nodelist {} {
     puts "</table>"
 }
 
+proc th {names} {
+    set out "<tr>"
+    foreach {n s} $sort {
+        if {$s} {
+            append out "<th><a href=\"?sort=[string tolower [string map {" " ""} $n]]\" style=\"text-decoration: none;\">$n</a></th>"
+        } else {
+            append out "<th>$n</th>"
+        }
+    }
+    append out "</tr>"
+    return $out
+}
+
 proc filelist {} {
     http_auth auth verify
     db function fsize {file size}
@@ -967,6 +980,10 @@ proc filelist {} {
     http_header
     html_head "File list"
     set order "lower(name)"
+    set page 0
+    set pagelen 100
+    if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page $a(page) }
+    set offset [expr {$page * $pagelen}]
     if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
     if {[info exists a(sort)] && $a(sort) == "modified"} { set order "modified desc" }
     if {[info exists a(sort)] && $a(sort) == "size"} { set order "fsize(filename) desc" }
