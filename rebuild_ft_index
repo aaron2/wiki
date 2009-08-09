@@ -1,0 +1,23 @@
+package require sqlite3
+
+catch {file delete fts.db}
+
+sqlite3 wiki wiki.db
+sqlite3 fts fts.db
+
+fts eval {create virtual table search using fts3('id','name','protect','content')}
+#fts eval {create virtual table search using fts3('id','name','protect','content', tokenize porter)}
+
+proc striphtml {data} {
+    regsub -all {<[^>]*?>} $data { } data
+    regsub -all {%[a-z]{3,7}\{.*?\}%} $data { } data
+    regsub -all {&#[0-9]{2,3};?} $data { } data
+    regsub -all {&[a-z]{2,5};} $data { } data
+    regsub -all {[a-z]{3,7}:[[:digit:]]+} $data { } data
+    return $data
+}
+
+wiki eval {select id,name,protect,parsed from nodes} {
+    set content "$name [striphtml $parsed]"
+    fts eval {insert into search (id,name,protect,content) values($id,$name,$protect,$content)}
+}
