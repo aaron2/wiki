@@ -25,24 +25,35 @@ proc userlist {} {
          <th><a href=\"?sort=user\" style=\"text-decoration: none;\">User</a></th>
          <th>Host</th>
          <th>Password</th>
-         <th>Name</th><th>Email</th>
+         <th>Name</th>
+         <th>Email</th>
          <th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
          <th><a href=\"?sort=level\" style=\"text-decoration: none;\">Level</a></th></tr>"
     db eval "select * from users order by $order" {
-        puts "<tr><td align=center><input type=checkbox name=\"delete:$user\"></td>
-             <td>$user</td><td>$ip</td>
-             <td><input type=password name=\"pass:$user\" size=14></td>
-             <td><input name=\"name:$user\" value=\"$name\"></td>
-             <td><input name=\"email:$user\" value=\"\"></td>
-             <td>[format_time $created]</td><td>"
-        # show the level dropdown as disabled if the viewer isnt an admin but the displayed user is
-        puts "<select name=\"level:$user\" [expr {($userlevel < 30 && $level >= 30) ? " disabled" : ""}]>"
-        foreach x {0 10 20 25 30} y {Blocked Base Edit Privileged Admin} {
-            # if user isnt admin and viewer isnt admin then dont show admin level in dropdown
-            if {$level < 30 && $x >= 30 && $userlevel < 30} { continue }
-            puts -nonewline "<option val=$x [expr {$x == $level ? " selected" : ""}]>$y"
+        if {$level <= $userlevel} {
+            puts "<tr><td align=center><input type=checkbox name=\"delete:$user\"></td>
+                 <td>$user</td>
+                 <td>$ip</td>
+                 <td><input type=password name=\"pass:$user\" size=14></td>
+                 <td><input name=\"name:$user\" value=\"$name\"></td>
+                 <td><input name=\"email:$user\" value=\"\"></td>
+                 <td>[format_time $created]</td>"
+            puts "<td><select name=\"level:$user\">"
+            foreach x {0 10 20 25 30} y {Blocked Base Edit Privileged Admin} {
+                if {$level > $userlevel} { continue }
+                puts -nonewline "<option val=$x [expr {$x == $level ? " selected" : ""}]>$y"
+            }
+            puts "</select></td></tr>"
+        } else {
+            puts "<tr><td></td>
+                 <td>$user</td>
+                 <td>$ip</td>
+                 <td></td>
+                 <td>$name</td>
+                 <td>$email</td>
+                 <td>[format_time $created]</td>
+                 <td></td></tr>"
         }
-        puts "</select></td></tr>"
     }
     set default 10
     # change the 1 to show multiple new user rows
@@ -66,38 +77,34 @@ proc userlist {} {
 # input: form postdata
 # returns: nothing
 proc saveusers {} {
+    http_auth user modify
     get_post input
+    foreach x [array names input pass%3A*] {
+        if {$input($x) != ""} { http_auth user password [string range $x 7 end] }
+    }
+    foreach x [array names input delete%3A*] {
+        if {$input($x) == "on"} { http_auth user delete [string range $x 9 end] }
+    }
+
+    db function password {hash_pass}
     for {set i 0} {$i < 10} {incr i} {
         if {![info exists input(level$i)] || ![info exists input(user$i)] || ![info exists input(pass$i)] || ![info exists input(ip$i)] || ![info exists input(name$i)]} { continue }
         if {$input(level$i) >= 10 && ($input(user$i) == "" || $input(pass$i) == "")} { continue }
         if {$input(level$i) < 5 && $input(ip$i) == ""} { continue }
         foreach x {user pass level ip name} { set $x $input($x$i) }
-
-        #db eval {insert into users (user,ip,name,level,created) values($user,$ip,$name,$level,datetime('now'))}
-        if {$level >= 10} {
-            #modify_passwd add $user $pass
-        }
+        db eval {insert into users (user,ip,name,password,level,created) values($user,$ip,$name,password($pass),$level,datetime('now'))}
     }
     foreach x [array names input pass%3A*] {
+        if {$input($x) == ""} { continue }
         set user [string range $x 7 end]
-        if {![db exists {select user from users where user=$user}]} { continue }
-        #if {$input($x) != ""} { modify_passwd modify $user $input($x) }
-        if {[info exists input(name%3A$user)]} {
-            set name $input(name%3A$user)
-            db eval {update users set name=$name where user=$user}
-        }
+        set pass $input($x)
+        db eval {update users set password=password($pass) where user=$user}
     }
     foreach x [array names input delete%3A*] {
         if {$input($x) != "on"} { continue }
         set user [string range $x 9 end]
         db eval {delete from users where user=$user}
         db eval {delete from cookies where user=$user}
-    }
-    foreach {entity action target} $auth {
-        http_auth $entity $action $target
-    }
-    foreach cmd $commands {
-        eval $cmd
     }
     db eval {commit transaction}
     location wiki:users
@@ -173,34 +180,34 @@ proc editconfig {} {
     db eval {select name,val from settings} { set tmpset($name) $val }
 
     if {[info exists input(status)]} { puts "<center>[filter_html $input(status)]</center><br><br>" }
-    puts "<form name=form action=\"[myself]/config\" method=post><table border=1 style=\"border: 1px solid black;\"><tr><td style=\"\"><table style=\"border: 1px solid black;\"> 
-          <tr><td style=\"border: 1px solid black;\">Title prefix</td>
-          <td style=\"border: 1px solid black;\"><input type=text name=NAME size=27 value=\"$tmpset(NAME)\"></td>
-          <td style=\"border: 1px solid black;\"></td>
-          <tr><td style=\"border: 1px solid black;\">Time zone</td><td style=\"border: 1px solid black;\">[tzselect $tmpset(TZ)]</td> 
-          <td rowspan=2 style=\"border: 1px solid black;\">Example:<br><span id=time></span><!--[format_time [clock format [clock seconds] -gmt 1]]--><br>
+    puts "<form name=form action=\"[myself]/config\" method=post><table style=\"border: 0px solid black;\"><tr><td style=\"\"><table style=\"border: 0px solid black;\"> 
+          <tr><td style=\"border: 0px solid black;\">Title prefix</td>
+          <td style=\"border: 0px solid black;\"><input type=text name=NAME size=27 value=\"$tmpset(NAME)\"></td>
+          <td style=\"border: 0px solid black;\"></td>
+          <tr><td style=\"border: 0px solid black;\">Time zone</td><td style=\"border: 0px solid black;\">[tzselect $tmpset(TZ)]</td> 
+          <td rowspan=2 style=\"border: 0px solid black;\">Example:<br><span id=time></span><!--[format_time [clock format [clock seconds] -gmt 1]]--><br>
           <a href=http://www.tcl.tk/man/tcl8.5/TclCmd/clock.htm#M26>format help</a></td></tr> 
-          <tr><td style=\"border: 1px solid black;\">Time format</td>
-          <td style=\"border: 1px solid black;\"><input type=text name=TF size=27 value=\"$tmpset(TF)\" id=timeinput></td></tr>
-          <tr><td style=\"border: 1px solid black;\">Filter HTML</td>
-          <td style=\"border: 1px solid black;\"><input type=checkbox name=FILTER_HTML [expr {$tmpset(FILTER_HTML) ? "checked" : ""}]></td></tr>
-          <tr><td valign=top style=\"border: 1px solid black;\">HTML whitelist</td>
-          <td style=\"border: 1px solid black;\"><textarea cols=25 rows=3 name=HTML_WHITELIST>$tmpset(HTML_WHITELIST)</textarea></td></tr>
-          <tr><td style=\"border: 1px solid black;\">Allow anon create</td>
-          <td style=\"border: 1px solid black;\"><input type=checkbox name=ANON_CREATE [expr {$tmpset(ANON_CREATE) ? "checked" : ""}]></td></tr>
-          <tr><td style=\"border: 1px solid black;\">Default permissions</td><td style=\"border: 1px solid black;\"><select name=PROTECT>"
+          <tr><td style=\"border: 0px solid black;\">Time format</td>
+          <td style=\"border: 0px solid black;\"><input type=text name=TF size=27 value=\"$tmpset(TF)\" id=timeinput></td></tr>
+          <tr><td style=\"border: 0px solid black;\">Filter HTML</td>
+          <td style=\"border: 0px solid black;\"><input type=checkbox name=FILTER_HTML [expr {$tmpset(FILTER_HTML) ? "checked" : ""}]></td></tr>
+          <tr><td valign=top style=\"border: 0px solid black;\">HTML whitelist</td>
+          <td style=\"border: 0px solid black;\"><textarea cols=25 rows=3 name=HTML_WHITELIST>$tmpset(HTML_WHITELIST)</textarea></td></tr>
+          <tr><td style=\"border: 0px solid black;\">Allow anon create</td>
+          <td style=\"border: 0px solid black;\"><input type=checkbox name=ANON_CREATE [expr {$tmpset(ANON_CREATE) ? "checked" : ""}]></td></tr>
+          <tr><td style=\"border: 0px solid black;\">Default permissions</td><td style=\"border: 0px solid black;\"><select name=PROTECT>"
     foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
         puts -nonewline "<option value=$val [expr {$val == $tmpset(PROTECT) ? " selected" : ""}]>$name"
     }
     puts "</select></td></tr>
 
-<tr><td style=\"border: 1px solid black;\"></td><td align=center style=\"border: 1px solid black;\">
+<tr><td style=\"border: 0px solid black;\"></td><td align=center style=\"border: 0px solid black;\">
 <br>
 <input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel  style=\"margin-left: 2em;\" onclick=\"javascript:history.go(-1);\"></td>
 </tr>
 </table><br><center>
-          <td valign=top style=\"border: 1px solid black; padding-left: 3em;\"></td></tr></table> 
+          <td valign=top style=\"border: 0px solid black; padding-left: 3em;\"></td></tr></table> 
           </form>";#</body></html>
 set secs [clock seconds]
 puts "<script>\nvar vals = \{"
