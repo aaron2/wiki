@@ -1515,7 +1515,7 @@ proc path_to_uri {path} {
 # performs parsing of node contents at display time
 proc parse_dynamic {id data} {
     #return $data
-    parse_tcl $id data
+    subst_commands $id data
     # escape special chars before subst
     set data [string map {[ \\[ \{ \\\{ \} \\\} $ \\$ \\ \\\\} $data]
     # %variables% - some of these are passed through static parsing
@@ -1599,25 +1599,38 @@ proc setup_interp {} {
     return $i
 }
 
-proc parse_tcl {id var} {
+proc subst_commands {id var} {
     upvar $var data
-    set indices [list]
-    foreach i [regexp -all -inline -indices {%tcl\{.*?\}%} $data] {
-        set indices [eval linsert [list $indices] 0 $i]
-    }
+    set indices [lreverse [regexp -all -inline -indices {%(\w+?)\{(.*?)\}%} $data]]
     if {[llength $indices] == 0} { return }
 
     set i [setup_interp]
-    foreach {x y} $indices {
+    foreach {contents_i type_i all_i} $indices {
         set output {}
-        interp invokehidden $i db eval "select id,name,tf(modified) as modified,tf(created) as created,modified_by from pages where id='$id'" {}
-        if {[catch {interp eval $i [string range $data [expr {$x + 5}] [expr {$y - 2}]]} err]} {
-            set output "<i>error in script</i>\n<!--\n$::errorInfo\n-->\n"
+        set type [string range $data [lindex $type_i 0] [lindex $type_i 1]]
+        switch -exact -- $type {
+            script -
+            tcl {
+                interp invokehidden $i db eval "select id,name,tf(modified) as modified,tf(created) as created,modified_by from pages where id='$id'" {}
+                if {[catch {interp eval $i [string range $data [lindex $contents_i 0] [lindex $contents_i 1]]} err]} {
+                    set output "<i>error in script</i>\n<!--\n$::errorInfo\n-->\n"
+                }
+                if {$::settings(FILTER_HTML)} {
+                    set output [filter_white_html $output]
+                }
+            }
+            include {
+                set node [string range $data [lindex $contents_i 0] [lindex $contents_i 1]]
+                interp eval $i [list set __inc $node]
+                if {[string is integer -strict $node]} {
+                    set output [join [interp eval $i [list sql {select parsed from pages where id=$__inc}]]]
+                } else {
+                    set output [join [interp eval $i [list sql {select parsed from pages where name=$__inc}]]]
+                }
+            }
         }
-        if {$::settings(FILTER_HTML)} {
-            set output [filter_white_html $output]
-        }
-        set data [string replace $data $x $y $output]
+        set output "<div class=include>$output</div>"
+        set data [string replace $data [lindex $all_i 0] [lindex $all_i 1] $output]
     }
     interp delete $i
 }
