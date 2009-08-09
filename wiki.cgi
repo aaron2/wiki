@@ -1005,6 +1005,8 @@ proc taglist {} {
 
 proc nodelist {} {
     set level [http_auth auth verify]
+    set perpage 5000
+    set page 0
     get_input a
     http_header
     html_head "Node list"
@@ -1013,13 +1015,14 @@ proc nodelist {} {
     if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
     if {[info exists a(sort)] && $a(sort) == "modified"} { set order "modified desc" }
     if {[info exists a(sort)] && $a(sort) == "perms"} { set order "protect" }
+    if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page [expr {$a(page) - 1}] }
     puts "<h1>Node list</h1><br><br>
          <table><tr><th><a href=\"?sort=name\" style=\"text-decoration: none;\">Name</a></th>
          <th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
          <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
          <th><a href=\"?sort=perms\" style=\"text-decoration: none;\">Perms</a></th>
          <th>Links</th><th>Tags</th></tr>"
-    db eval "select id,name,tf(created) as created,tf(modified) as modified,protect from nodes where protect<=$level and id not in (select distinct node from tags where name='wiki:hide') order by $order" {
+    db eval "select id,name,tf(created) as created,tf(modified) as modified,protect from nodes where protect<=$level and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset ($page * $perpage)" {
         puts "<tr><td>[link node:$id $name]</td><td>$created</td><td>$modified</td><td align=center>$perm($protect)</td>"
         puts "<td align=center>[link links:$id [db eval {select count(node) from links where target=$id and type='node'}]]</td><td>"
         db eval {select name from tags where node=$id} {
@@ -1185,11 +1188,13 @@ proc location {loc args} {
 
 proc html_head {title} {
     puts "<head>\n<title>$title</title>"
-    db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {}
-    if {[info exists parsed]} {
-        set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
+    db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {
+    #    set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
         puts "<style>\n$parsed\n</style>\n"
     }
+    #foreach x [glob -nocomplain includes/*.css] {
+    #    puts "<link rel=stylesheet href=[myself]/$x>"
+    #}
     puts "</head><body>"
 }
 
