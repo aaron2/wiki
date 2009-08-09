@@ -166,36 +166,70 @@ proc editpage {id args} {
 # returns: nothing
 proc editconfig {} {
     http_auth wiki config
-    http_header
-    html_head "Wiki Configuration"
-    puts "<h1>Wiki Configuration</h1><br>"
     get_input input
+    http_header
+    html_head "Wiki configuration"
+    puts "<h1>Wiki configuration</h1><br>"
     db eval {select name,val from settings} { set tmpset($name) $val }
 
     if {[info exists input(status)]} { puts "<center>[filter_html $input(status)]</center><br><br>" }
-    puts "<form name=form action=\"[myself]/config\" method=post><table style=\"border: 0px;\"><tr><td style=\"\"><table style=\"border: 0px;\"> 
-          <tr><td style=\"border: 0px;\">Title prefix</td>
-          <td style=\"border: 0px;\"><input type=text name=NAME size=27 value=\"$tmpset(NAME)\"></td>
-          <td style=\"border: 0px;\"></td>
-          <tr><td style=\"border: 0px;\">Time zone</td><td style=\"border: 0px;\">[tzselect $tmpset(TZ)]</td> 
-          <td rowspan=2 style=\"border: 0px;\">Example:<br>[format_time [clock format [clock seconds] -gmt 1]]<br>
+    puts "<form name=form action=\"[myself]/config\" method=post><table border=1 style=\"border: 1px solid black;\"><tr><td style=\"\"><table style=\"border: 1px solid black;\"> 
+          <tr><td style=\"border: 1px solid black;\">Title prefix</td>
+          <td style=\"border: 1px solid black;\"><input type=text name=NAME size=27 value=\"$tmpset(NAME)\"></td>
+          <td style=\"border: 1px solid black;\"></td>
+          <tr><td style=\"border: 1px solid black;\">Time zone</td><td style=\"border: 1px solid black;\">[tzselect $tmpset(TZ)]</td> 
+          <td rowspan=2 style=\"border: 1px solid black;\">Example:<br><span id=time></span><!--[format_time [clock format [clock seconds] -gmt 1]]--><br>
           <a href=http://www.tcl.tk/man/tcl8.5/TclCmd/clock.htm#M26>format help</a></td></tr> 
-          <tr><td style=\"border: 0px;\">Time format</td>
-          <td style=\"border: 0px;\"><input type=text name=TF size=27 value=\"$tmpset(TF)\"></td></tr>
-          <tr><td style=\"border: 0px;\">Filter HTML</td>
-          <td style=\"border: 0px;\"><input type=checkbox name=FILTER_HTML [expr {$tmpset(FILTER_HTML) ? "checked" : ""}]></td></tr>
-          <tr><td valign=top style=\"border: 0px;\">HTML whitelist</td>
-          <td style=\"border: 0px;\"><textarea cols=25 rows=3 name=HTML_WHITELIST>$tmpset(HTML_WHITELIST)</textarea></td></tr>
-          <tr><td style=\"border: 0px;\">Allow anon create</td>
-          <td style=\"border: 0px;\"><input type=checkbox name=ANON_CREATE [expr {$tmpset(ANON_CREATE) ? "checked" : ""}]></td></tr>
-          <tr><td style=\"border: 0px;\">Default permissions</td><td style=\"border: 0px;\"><select name=PROTECT>"
+          <tr><td style=\"border: 1px solid black;\">Time format</td>
+          <td style=\"border: 1px solid black;\"><input type=text name=TF size=27 value=\"$tmpset(TF)\" id=timeinput></td></tr>
+          <tr><td style=\"border: 1px solid black;\">Filter HTML</td>
+          <td style=\"border: 1px solid black;\"><input type=checkbox name=FILTER_HTML [expr {$tmpset(FILTER_HTML) ? "checked" : ""}]></td></tr>
+          <tr><td valign=top style=\"border: 1px solid black;\">HTML whitelist</td>
+          <td style=\"border: 1px solid black;\"><textarea cols=25 rows=3 name=HTML_WHITELIST>$tmpset(HTML_WHITELIST)</textarea></td></tr>
+          <tr><td style=\"border: 1px solid black;\">Allow anon create</td>
+          <td style=\"border: 1px solid black;\"><input type=checkbox name=ANON_CREATE [expr {$tmpset(ANON_CREATE) ? "checked" : ""}]></td></tr>
+          <tr><td style=\"border: 1px solid black;\">Default permissions</td><td style=\"border: 1px solid black;\"><select name=PROTECT>"
     foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
         puts -nonewline "<option value=$val [expr {$val == $tmpset(PROTECT) ? " selected" : ""}]>$name"
     }
-    puts "</select></td></tr></table><br><center><input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
+    puts "</select></td></tr>
+
+<tr><td style=\"border: 1px solid black;\"></td><td align=center style=\"border: 1px solid black;\">
+<br>
+<input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel  style=\"margin-left: 2em;\" onclick=\"javascript:history.go(-1);\"></td>
-          <td valign=top style=\"border: 0px; padding-left: 3em;\"></td></tr></table> 
-          </form></body></html>"
+</tr>
+</table><br><center>
+          <td valign=top style=\"border: 1px solid black; padding-left: 3em;\"></td></tr></table> 
+          </form>";#</body></html>
+set secs [clock seconds]
+puts "<script>\nvar vals = \{"
+foreach x {a A b B c C d D e h H k l m M N p P r R S T u y Y z} {
+    puts "\"$x\": \"[clock format $secs -format %$x]\","
+}
+puts "\"Z\": \"[clock format $secs -format %Z]\"\n\};\n"
+
+puts "
+var n = document.getElementById('time');
+var input = document.getElementById('timeinput');
+
+function update_example() {
+  while (n.firstChild) {
+    n.removeChild(n.firstChild);
+  }
+  var str = input.value.replace(/%(.)/g, clockFormat);
+  n.appendChild(document.createTextNode(str));
+}
+
+function clockFormat(str, chr) {
+  return vals\[chr] || str;
+}
+
+input.onkeyup = update_example;
+update_example();
+</script>
+"
+
 }
 
 # handles the post of the wiki config page
