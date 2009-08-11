@@ -501,7 +501,7 @@ proc format_diff {diff orig} {
 }
 
 proc create_history_entry {id} {
-    db eval {select content as new,modified_by from nodes where id=$id} {}
+    db eval {select content as new,modified,modified_by from nodes where id=$id} {}
     set type full
     set content $new
     #db eval {select content as lastfull from history where original=$id and type='full' order by id desc limit 1} {}
@@ -513,7 +513,7 @@ proc create_history_entry {id} {
     #    }
     #    #elseif {[db eval {select count(type) from (select type from history where original=$id order by created desc limit 7) where type='full'}] == 0}
     #}
-    db eval {insert into history (original,type,content,created,created_by) values($id,$type,$content,datetime('now'),$modified_by)}
+    db eval {insert into history (original,type,content,created,created_by) values($id,$type,$content,$modified,$modified_by)}
 }
 
 proc get_history_content {id} {
@@ -886,7 +886,7 @@ proc link {to text} {
 }
 
 proc showhistory {nodeid} {
-    db eval {select name,modified_by,content from nodes where id=$nodeid} {}
+    db eval {select name,tf(modified) as modified,modified_by, content from nodes where id=$nodeid} {}
     if {[info exists name]} {
         set title "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
     } elseif {[db exists {select id from history where original=$nodeid limit 1}]} {
@@ -900,11 +900,13 @@ proc showhistory {nodeid} {
     puts "<h1>Revision history for node $nodeid</h1><br>"
     puts $title
 
-    puts "<table><th>Rev</th><th>Saved</th><th>By</th><th>Line &#916;</th><th>Compare</th></tr>"
+    puts "<table><th>Rev</th><th>Created</th><th>By</th><th>Line &#916;</th><th>Compare</th></tr>"
     set i [db eval {select count(original) from history where original=$nodeid}]
-    puts "<tr><td align=center>[expr {$i + 1}]</td><td align=center>[link node:$nodeid current]</td><td>$modified_by</td>"
+    puts "<tr><td align=center>[link node:$nodeid [expr {$i + 1}]]</td><td align=center>$modified</td><td>$modified_by</td>"
+
     set nextlines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
     set nextid [db eval {select id from history where original=$nodeid order by created desc limit 1}]
+
     db eval {select id,type,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
         set lines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
         if {$nextid == $id} {
@@ -914,24 +916,27 @@ proc showhistory {nodeid} {
         }
         set nextlines $lines
         set nextid $id
-        puts "<tr><td align=center>$i</td><td>[link viewhistory:$id $created]</td><td>$created_by</td>"
+        puts "<tr><td align=center>[link viewhistory:$id $i]</td><td>$created</td><td>$created_by</td>"
         incr i -1
     }
     puts "<td align=center><b>$lines</b></td><td>[link diff:curr:$id current]</td></tr></table>"
 }
 
 proc viewhistory {id} {
-    db eval {select original,tf(created) as created from history where id=$id} {}
+    db eval {select original,tf(created) as created,created as oc from history where id=$id} {}
     if {![info exists original]} { http_error 404 "no such node" }
     http_auth node view $original
     http_header
     html_head "History for node $original"
+    db eval {select tf(created) as nexttime,id as nextid from history where original=$original and created>$oc order by created limit 1} {}
+    set next [expr {![info exists nextid] ? "current" : [link viewhistory:$nextid $nexttime]}]
 
     db eval {select name from nodes where id=$original} {}
     if {![info exists name]} {
-        puts "Contents of deleted node $original until $created<br><hr>"
+        puts "Contents of deleted node $original created $created<br><hr>"
     } else {
-        puts "Contents of &quot;[link node:$original $name]&quot; until $created<br><hr>"
+        #puts "Contents of [link node:$original $name] - created $created until $next<br><hr>"
+        puts "Contents of &quot;[link node:$original $name]&quot; created $created<br><hr>"
     }
     set content [string map {& &amp;} [get_history_content $id]]
     puts "<pre>[filter_html $content]</pre><hr>"
