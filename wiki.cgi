@@ -199,8 +199,10 @@ proc editconfig {} {
     foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
         puts -nonewline "<option value=$val [expr {$val == $tmpset(PROTECT) ? " selected" : ""}]>$name"
     }
-    puts "</select></td></tr>
+    puts "</select></td></tr>"
+    puts "<tr><td style=\"border: 0px solid black;\">Login expires</td><td style=\"border: 0px solid black;\"><input type=text name=EXPIRES size=27 value=\"$tmpset(EXPIRES)\"></td></tr>"
 
+    puts "
 <tr><td style=\"border: 0px solid black;\"></td><td align=center style=\"border: 0px solid black;\">
 <br>
 <input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
@@ -248,10 +250,14 @@ proc saveconfig {} {
     # checkboxes dont submit any data when not checked, so keep a list of them
     set checkboxes {FILTER_HTML ANON_CREATE}
     # dont trust the form just look for known valid options. this list must be kept in sync with editconfig and the db
-    foreach x {NAME TZ TF FILTER_HTML HTML_WHITELIST ANON_CREATE} {
+    foreach x {NAME TZ TF FILTER_HTML HTML_WHITELIST ANON_CREATE EXPIRES} {
         if {[info exists input($x)]} {
             if {$x == "TZ" && [catch {clock format [clock seconds] -timezone $input($x)} err]} {
                 lappend status "Invalid timezone"
+                continue
+            }
+            if {$x == "EXPIRES" && ([catch {set tmp [clock scan $input($x)]}] || $tmp < [clock seconds])} {
+                lappend status "Invalid expiration"
                 continue
             }
             # the whitelist must be sorted since we use lsearch -sorted on it in [filter_white_html]
@@ -684,6 +690,7 @@ proc do_login {} {
     set user $input(username)
     set pass $input(password)
     set ip $::env(REMOTE_ADDR)
+    set expires $::settings(EXPIRES)
     if {![db exists {select user from users where user=$user and password=password($pass) and password<>''}]} {
         location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
         return
@@ -696,8 +703,13 @@ proc do_login {} {
         append key [string index $chars [expr {int(rand() * $size)}]]
     }
 
-    set_cookie AUTH $key "7 days"
-    set expires [clock format [clock scan "7 days"] -format "%Y-%m-%d %H:%M:%S" -gmt 1]
+    if {[info exists input(remember)] && $input(remember) == "on"} {
+        set_cookie AUTH $key $expires
+    } else {
+        set_cookie AUTH $key ""
+        set expires "2 days"
+    }
+    set expires [clock format [clock scan $expires] -format "%Y-%m-%d %H:%M:%S" -gmt 1]
     db eval {delete from cookies where user=$user and (expires<datetime('now') or ip=$ip)}
     db eval {insert into cookies (user,ip,key,created,expires) values($user,$ip,$key,datetime('now'),$expires)}
     db eval {commit transaction}
@@ -708,7 +720,11 @@ proc do_login {} {
 # sets an http cookie
 # input: key value pair, and expiration date in any format tcl recognizes
 proc set_cookie {key val expires} {
-    puts "Set-Cookie: $key=$val; PATH=[file dirname $::request(PATH_INFO)]; EXPIRES=[clock format [clock scan $expires] -format "%a, %d-%b-%Y %H:%M:%S" -gmt 1];"
+    set cookie "$key=$val; PATH=[file dirname $::request(PATH_INFO)];"
+    if {$expires != ""} {
+        append cookie "EXPIRES=[clock format [clock scan $expires] -format "%a, %d-%b-%Y %H:%M:%S" -gmt 1];"
+    }
+    puts "Set-Cookie: $cookie"
 }
 
 # logs a user out by deleting any auth tokens from the db and expiring the auth cookie
@@ -746,7 +762,7 @@ proc login {} {
          <tr><td style=\"border: 0px;\">Password:</td>
          <td style=\"border: 0px;\"><input type=password name=password></td></tr>"
     if {[info exists input(href)]} { puts "<input type=hidden name=href value=\"$input(href)\">" }
-    puts {<tr><td colspan=2 align=center style="border: 0px;"><input type=submit value="Log In"></td></tr></table></form>}
+    puts {<tr><td align=left style="border: 0px; font-size=60%;"><input type=checkbox name=remember checked> Remember me</td><td align=center style="border: 0px;"><input type=submit value="Log In"></td></tr></table></form>}
     puts {<script>document.getElementById('username').focus();</script>}
     puts {</body></html>}
 }
