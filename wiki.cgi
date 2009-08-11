@@ -619,6 +619,7 @@ proc http_auth {entity action {target {}}} {
             }
         }
         *:delete { set reqlevel 25 }
+        node:wikitag { set reqlevel 25 }
         node:edit {
             set reqlevel [db onecolumn {select protect from nodes where id=$target}]
         }
@@ -629,7 +630,8 @@ proc http_auth {entity action {target {}}} {
         }
         *:create {
             set reqlevel 10
-            if {[db onecolumn {select val from settings where name='ANON_CREATE'}] > 0} {
+            #if {[db onecolumn {select val from settings where name='ANON_CREATE'}] > 0} {}
+            if {$::settings(ANON_CREATE) > 0} {
                  set reqlevel 5
             }
         }
@@ -977,11 +979,12 @@ proc showfile {id} {
 	if (confirm(\"Delete file\\n$name?\")) { document.forms\[0].action = \"[myself]/delete:$id\"; document.forms\[0].submit(); }
         }
         </script>"
+    set size [expr {[file exists $filename] ? [fsize [file size $filename]] : "file not found"}]
     puts "<h1>File Information: $name</h1><br><br>
          <form method='POST' enctype='multipart/form-data' action='[myself]/upload:$id'>
          <table><tr><td>Name:</td><td><input type=text name=name value=\"$name\" size=60></td></tr>
          <tr><td>Filename:</td><td>[file tail $filename]</td></tr>
-         <tr><td>Size:</td><td>[fsize [file size $filename]]</td></tr>
+         <tr><td>Size:</td><td>$size</td></tr>
          <tr><td>Original name:</td><td>$original_name</td></tr>
          <tr><td>Created:</td><td>$created</td></tr>
          <tr><td>Modified:</td><td>$modified</td></tr>
@@ -1042,7 +1045,7 @@ proc taglist {} {
 
 proc nodelist {} {
     set level [http_auth auth verify]
-    set perpage 5000
+    set perpage 1000
     set page 0
     get_input a
     http_header
@@ -1053,6 +1056,8 @@ proc nodelist {} {
     if {[info exists a(sort)] && $a(sort) == "modified"} { set order "modified desc" }
     if {[info exists a(sort)] && $a(sort) == "perms"} { set order "protect" }
     if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page [expr {$a(page) - 1}] }
+    if {[info exists a(perpage)] && [string is integer -strict $a(perpage)]} { set perpage $a(perpage) }
+# <tr><td><< Prev</td><td></td><td></td><td></td><td></td><td align=right>Next >></td></tr><tr>
     puts "<h1>Node list</h1><br><br>
          <table><tr><th><a href=\"?sort=name\" style=\"text-decoration: none;\">Name</a></th>
          <th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
@@ -1103,8 +1108,9 @@ proc filelist {} {
          <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
          <th><a href=\"?sort=size\" style=\"text-decoration: none;\">Size</a></th></tr>"
     db eval "select id,name,filename,tf(created) as created,tf(modified) as modified from files order by $order" {
-        puts "<tr><td>[link file:$id $name]</td><td><a href=[path_to_uri $filename]>[file tail $filename]</a></td>
-             <td>$created</td><td>$modified</td><td>[fsize [file size $filename]]</td></tr>"
+        set size [expr {[file exists $filename] ? [fsize [file size $filename]] : ""}]
+        puts "<tr><td>[link file:$id $name]</td><td><a href=\"[path_to_uri $filename]\">[file tail $filename]</a></td>
+             <td>$created</td><td>$modified</td><td>$size</td></tr>"
     }
     puts "</table>"
 }
@@ -1178,6 +1184,12 @@ proc upload_post {id} {
         if {$name == ""} { set name [file rootname $tail] }
         set base [file dirname $::request(PATH_TRANSLATED)]/files/
         set tail [string map {" " _} $tail]
+        #set filename [file join $base $tail]
+        #set num 1
+        #while {[file exists $filename]} {
+        #    set filename [file join $base [format %s%d%s [file rootname $base] $num [file extension $base]]]
+        #    incr num
+        #}
         # start with 0000 before filename, increment it until we get a unique name
         set num 0
         while {[file exists [set filename [format "%s%04d%s" $base $num $tail]]]} { incr num }
@@ -1413,7 +1425,7 @@ proc static_options {id opt data} {
                     upvar 2 level level
                     #if {$level < 25} { continue }
                 }
-                #db eval {insert or ignore into tags (name,node) values(lower($x),$id)}
+                db eval {insert or ignore into tags (name,node) values(lower($x),$id)}
             }
             return
         }
