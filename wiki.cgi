@@ -819,8 +819,6 @@ proc do_search {{q {}}} {
         location wiki:search
         return
     }
-    http_header
-    html_head "Search results"
 
     set level [http_auth auth verify]
     set matches {}
@@ -834,32 +832,50 @@ proc do_search {{q {}}} {
     }
     set numterms [llength $tagterms]
 
-    puts "<h1>Search results</h1><br>"
-    puts "Searched for \"[filter_html [join $input(string)]]\"<br>"
-    puts "<h3>Tag results</h3>"
+    set results ""
+    set term [string map {\" &quot;} [filter_html $input(string)]]
+    append results "<h3>Tag results</h3>"
     db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and nodes.protect<=$level group by tags.node order by count(tags.name) desc" {
         if {$numterms == $count(tags.name)} { lappend matches $id }
-        puts "[link node:${tags.node} ${nodes.name}]&nbsp;&nbsp;&nbsp;<span class=tags>("
+        append results "[link node:${tags.node} ${nodes.name}]&nbsp;&nbsp;&nbsp;<span class=tags>("
         db eval {select name from tags where node=$id} {
-            puts -nonewline "[link tag:$name $name] "
+            append results "[link tag:$name $name] "
         }
-        puts ")</span><br>"
+        append results ")</span><br>"
     }
 
-    puts "<br><h3>Full text results</h3>"
+    append results "<br><h3>Full text results</h3>"
     fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and protect<=$level} {
 
-        puts "[link node:$id $name]"
+        append results "[link node:$id $name]"
         if {[set tags [db eval {select name from tags where node=$id}]] != ""} {
-            puts "&nbsp;&nbsp;&nbsp;<span class=tags>("
-            foreach x $tags { puts -nonewline "[link tag:$x $x] " }
-            puts -nonewline ")</span>"
+            append results "&nbsp;&nbsp;&nbsp;<span class=tags>("
+            foreach x $tags { append results "[link tag:$x $x] " }
+            append results ")</span>"
         }
-        puts "<br>$snippet<br><br>"
+        append results "<br>$snippet<br><br>"
         lappend matches $id
     }
-    if {[llength $matches] == 1} {
-        # do something here
+
+    if {[llength $matches] != 1} {
+        http_header
+        html_head "Search results"
+        puts "<h1>Search results</h1><br>"
+        puts "<form name=search method=post action=[myself]/search>Searched for <input name=string value=\"$term\" size=30> <input type=submit value=\"Search Again\"></form>"
+    }
+
+    if {$::request(USER) != "anonymous" && !$::request(USER_AUTH)} {
+        puts "You are not logged in. It is likely you will see more results if you [link wiki:login "log in"]"
+    } elseif {[llength $matches] == 1} {
+        location node:[lindex $matches 0]
+        return
+    }
+
+    if {[llength $matches] == 0} {
+        # no results
+        puts "No pages matched your search terms"
+    } else {
+        puts $results
     }
 }
 
