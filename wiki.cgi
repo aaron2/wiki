@@ -162,7 +162,7 @@ proc editpage {id args} {
     foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
         # if user is logged in, only show them allowed permissions. if user is anon they will be prompted
         # to log in if selected permissions are above anon priviledge
-        if {[info exists ::request(REMOTE_USER)] && $val > $level} { continue }
+        if {$::request(USER_AUTH) && $val > $level} { continue }
         puts -nonewline "<option value=$val [expr {$val == $protect ? " selected" : ""}]>$name"
     }
     puts "</select></form></body></html>"
@@ -320,8 +320,8 @@ proc editprefs {} {
           <a href=http://www.tcl.tk/man/tcl8.5/TclCmd/clock.htm#M26>format help</a></td></tr>
           <tr><td style=\"border: 0px;\">Time format</td>
           <td style=\"border: 0px;\"><input type=text name=TF size=27 value=\"$::settings(TF)\"></td></tr>"
-    if {[info exists ::request(REMOTE_USER)]} {
-        puts "<tr><td style=\"border: 0px;\">Password</td><td style=\"border: 0px;\"><input type=password name=password size=27><input type=hidden name=user value=\"$::request(REMOTE_USER)\"></td></tr>"
+    if {$::request(USER_AUTH)]} {
+        puts "<tr><td style=\"border: 0px;\">Password</td><td style=\"border: 0px;\"><input type=password name=password size=27><input type=hidden name=user value=\"$::request(USER)\"></td></tr>"
     }
     puts "</table><br><center><input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel style=\"margin-left: 2em;\" onclick=\"javascript:history.go(-1);\"></td>
@@ -571,12 +571,11 @@ proc http_auth {entity action {target {}}} {
     if {![info exists user]} {
         # expire an invalid auth cookie if it exists
         if {[info exists ::cookies(AUTH)]} { set_cookie AUTH "" "5 days ago" }
-        set user anonymous
+        set user $::request(USER)
         set level 5
-        set name {}
     } else {
-        # this variables existance indicates an authenticated non anonymous user
-        set ::request(REMOTE_USER) $user
+        set ::request(USER_AUTH) 1
+        set ::request(USER) $user
     }
     # check the db for ip address matches
     db eval {select user as huser,ip,level as hlev from users where ip != '' and (user=$user or user='' or user='*')} {
@@ -732,12 +731,12 @@ proc set_cookie {key val expires} {
 # logs a user out by deleting any auth tokens from the db and expiring the auth cookie
 proc logout {} {
     http_auth auth verify
-    if {![info exists ::request(REMOTE_USER)]} {
+    if {!$::request(USER_AUTH)} {
         location wiki:login
         return
     }
     set ip $::request(REMOTE_ADDR)
-    set user $::request(REMOTE_USER)
+    set user $::request(USER)
     db eval {delete from cookies where user=$user and ip=$ip}
     set_cookie AUTH "" "5 days ago"
     location wiki:login
@@ -751,21 +750,24 @@ proc login {} {
     http_header
     html_head "$::settings(NAME) Login"
     get_input input
+    set user ""
 
     if {[info exists input(message)]} {
         puts "<span style=\"color:red;\">[filter_html $input(message)]</span><br><br>"
     }
-    if {[info exists ::request(REMOTE_USER)]} {
-        puts "You are already logged in as user &quot;$::request(REMOTE_USER)&quot;<br>You may switch users by logging in again below.<br>If this is the correct user then it is likely you do not have sufficient privileges for the action you were trying to perform<br>"
+    if {$::request(USER_AUTH)} {
+        puts "You are already logged in as user &quot;$::request(USER)&quot;<br>You may switch users by logging in again below.<br>If this is the correct user then it is likely you do not have sufficient privileges for the action you were trying to perform<br>"
+    } elseif {$::request(USER) != "anonymous"} {
+        set user $::request(USER)
     }
     puts "<form action=\"[myself]/login\" method=post>
          <table style=\"border: 0px;\"><tr><td style=\"border: 0px;\">Username:</td>
-         <td style=\"border: 0px;\"><input name=username id=username></td></tr>
+         <td style=\"border: 0px;\"><input name=username id=username value=\"$user\"></td></tr>
          <tr><td style=\"border: 0px;\">Password:</td>
          <td style=\"border: 0px;\"><input type=password name=password></td></tr>"
     if {[info exists input(href)]} { puts "<input type=hidden name=href value=\"$input(href)\">" }
     puts {<tr><td align=left style="border: 0px; font-size=60%;"><input type=checkbox name=remember checked> Remember me</td><td align=center style="border: 0px;"><input type=submit value="Log In"></td></tr></table></form>}
-    puts {<script>document.getElementById('username').focus();</script>}
+    puts {<script>username = document.getElementById('username'); if (username.value == "") { username.focus(); } else { document.getElementById('password').focus(); }</script>}
     puts {</body></html>}
 }
 
@@ -1591,8 +1593,8 @@ proc dynamic_variable {var} {
             return [join $out]
         }
         LOGIN {
-            if {[info exists ::request(REMOTE_USER)]} {
-                return "logged in as $::request(REMOTE_USER) - <a href=\"[myself]/wiki:logout\">logout</a>"
+            if {$::request(USER_AUTH)]} {
+                return "logged in as $::request(USER) - <a href=\"[myself]/wiki:logout\">logout</a>"
             } else {
                 puts "<a href=\"[myself]/wiki:login\">login</a>"
             }
@@ -1804,7 +1806,8 @@ proc savepage {id} {
     set strip "$input(name) [striphtml $parsed]"
     append parsed "\n<!-- static parse time: $time -->"
 
-    set user [expr {[info exists ::request(REMOTE_USER)] ? "$::request(REMOTE_USER)" : "anonymous"}]@$::request(REMOTE_ADDR)
+    #set user [expr {[info exists ::request(REMOTE_USER)] ? "$::request(REMOTE_USER)" : "anonymous"}]@$::request(REMOTE_ADDR)
+    set user "$::request(USER)@$::request(REMOTE_ADDR)"
 
     if {$id == "new"} {
         db eval {insert into nodes (name,content,parsed,protect,modified,created,modified_by) values($input(name),$input(content),$parsed,$input(protect),datetime('now'),datetime('now'),$user)}
@@ -1954,6 +1957,8 @@ if {[info exists env(GATEWAY_INTERFACE)]} {
     foreach x {CONTENT_TYPE HTTP_COOKIE} {
         if {[info exists env($x)]} { set request($x) $env($x) }
     }
+    set request(USER) anonymous
+    set request(USER_AUTH) 0
     service_request
     close_databases
 
