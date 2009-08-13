@@ -110,32 +110,7 @@ proc saveusers {} {
     location wiki:users
 }
 
-# show the node editing page
-# input: existing node id or "new", optionally a title and initial content if the id is "new"
-# returns: nothing
-proc editpage {id args} {
-    if {$id == "new"} {
-        set level [http_auth node create]
-        http_header
-        html_head "Creating new page"
-        puts "<h1>Creating new page</h1><br>"
-        set action [myself]/new
-        set name [lindex $args 0]
-        set content [lindex $args 1]
-        set back "history.go(-1)"
-        set protect $::settings(PROTECT)
-    } else {
-        db eval {select name,content,protect from nodes where id=$id} {}
-        if {![info exists name]} { http_error 404 "no such node" }
-        set level [http_auth node edit $id]
-        http_header
-        html_head "Editing $name"
-        set action [myself]/edit:$id
-        set content [string map {& &#38;} $content]
-        regsub "^\n" $content "\\&nbsp;\n" content
-        set back "document.location='[myself]/node:$id'"
-    }
-
+proc editor {userlevel objectlevel action name content back} {
     # this js handles resizing the textarea to fit the browser vertically
     puts {<script language="javascript">
           function maxSize() {
@@ -157,15 +132,48 @@ proc editpage {id args} {
           <input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel onclick=\"javascript:$back;\" style=\"margin-left: 2em;\">
           <input type=hidden name=editstarted value=[clock seconds]>
-          <a style=\"position: absolute; right: 50%;\" href=[myself]/tag:wiki:help>Help</a>
-          <select name=protect style=\"position: absolute; right: 1em;\">"
-    foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
-        # if user is logged in, only show them allowed permissions. if user is anon they will be prompted
-        # to log in if selected permissions are above anon priviledge
-        if {$::request(USER_AUTH) && $val > $level} { continue }
-        puts -nonewline "<option value=$val [expr {$val == $protect ? " selected" : ""}]>$name"
+          <a style=\"position: absolute; right: 50%;\" href=[myself]/tag:wiki:help>Help</a>"
+
+    if {$objectlevel != ""} {
+        puts "<select name=protect style=\"position: absolute; right: 1em;\">"
+        foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
+            # if user is logged in, only show them allowed permissions. if user is anon they will be prompted
+            # to log in if selected permissions are above anon priviledge
+            if {$::request(USER_AUTH) && $val > $userlevel} { continue }
+            puts -nonewline "<option value=$val [expr {$val == $objectlevel ? " selected" : ""}]>$name"
+        }
+        puts "</select>"
     }
-    puts "</select></form></body></html>"
+    puts "</form>"
+}
+
+# show the node editing page
+# input: existing node id or "new", optionally a title and initial content if the id is "new"
+# returns: nothing
+proc editnode {id args} {
+    if {$id == "new"} {
+        set leve [http_auth node create]
+        http_header
+        html_head "Creating new page"
+        puts "<h1>Creating new page</h1><br>"
+        set action [myself]/new
+        set name [lindex $args 0]
+        set content [lindex $args 1]
+        set back "history.go(-1)"
+        set protect $::settings(PROTECT)
+    } else {
+        db eval {select name,content,protect from nodes where id=$id} {}
+        if {![info exists name]} { http_error 404 "no such node" }
+        set level [http_auth node edit $id]
+        http_header
+        html_head "Editing $name"
+        set action [myself]/edit:$id
+        set content [string map {& &#38;} $content]
+        regsub "^\n" $content "\\&nbsp;\n" content
+        set back "document.location='[myself]/node:$id'"
+    }
+    editor $level $protect $action $name $content $back
+    puts "</body></html>"
 }
 
 # show the wiki configuration page
@@ -393,26 +401,43 @@ proc saveprefs {} {
 proc showdiff {diff} {
     set from [lindex [split $diff :] 0]
     set to [lindex [split $diff :] 1]
+
+    db eval {select original,tf(created) as created,created_by from history where id=$to} to_data {}
+    if {![info exists to_data(created)]} { http_error 404 "no such node" }
+
+    if {$from != "curr"} {
+        db eval {select original,tf(created) as created,created_by from history where id=$from} from_data {}
+        if {![info exists from_data(created)]} { http_error 404 "no such node" }
+    } else {
+        db eval {select id as original,content,tf(modified) as created,modified_by as created_by from nodes where id=$to_data(original)} from_data {}
+        if {![info exists from_data(created)]} { http_error 404 "no such node" }
+    }
+    if {$from_data(original) != $to_data(original)} {
+        http_error 500 "history entries are for different nodes"
+    }
+
     db eval {select nodes.id as node,nodes.name as name from nodes,history where nodes.id=history.original and history.id=$to} {}
-    if {![info exists node]} { http_error 404 "no such node" }
+    if {![info exists node]} {
+        set node deleted
+        set name "deleted node $to_data(original)"
+    }
+
     http_auth node view $node
     http_header
     html_head "Diffing $name"
-    set revs [db eval {select id from history where original=$node}]
+    set revs [db eval {select id from history where original=$to_data(original)}]
+
     if {$from == "curr"} {
-        db eval {select content from nodes where id=$node} {}
         puts "[link node:$node "Revision [expr {[llength $revs] + 1}]"] (current)<br>"
     } else {
-        db eval {select tf(created) as created,created_by from history where id=$from} {}
-        set content [get_history_content $from]
-        puts "[link viewhistory:$from "Revision [expr {[lsearch $revs $from] + 1}]"] saved by $created_by on $created<br>"
+        puts "[link viewhistory:$from "Revision [expr {[lsearch $revs $from] + 1}]"] modified by $from_data(created_by) on $from_data(created)<br>"
+        set from_data(content) [get_history_content $from]
     }
-    db eval {select tf(created) as created,created_by from history where id=$to} {}
-    set content2 [get_history_content $to]
-    puts "[link viewhistory:$to "Revision [expr {[lsearch $revs $to] + 1}]"] saved by $created_by on $created<br>\n<hr>"
-    set content [filter_html $content]
-    set content2 [filter_html $content2]
-    puts "<pre>[format_diff [diff $content $content2] $content2]</pre>"
+    puts "[link viewhistory:$to "Revision [expr {[lsearch $revs $to] + 1}]"] modified by $to_data(created_by) on $to_data(created)<br>\n<hr>"
+
+    set to_data(content) [filter_html [get_history_content $to]]
+    set from_data(content) [filter_html $from_data(content)]
+    puts "<pre>[format_diff [diff $from_data(content) $to_data(content)] $to_data(content)]</pre>"
     puts "<br><hr>"
 }
 
@@ -624,8 +649,13 @@ proc http_auth {entity action {target {}}} {
         }
         node:view {
             set reqlevel [db onecolumn {select protect from nodes where id=$target}]
-            # nodes protect level is for editing, for viewing lower it by 5 unless its privileged
-            if {$reqlevel < 20 && $reqlevel >= 10} { incr reqlevel -5 }
+            if {$reqlevel == ""} {
+                # nonexistent or deleted node
+                set reqlevel 25
+            } elseif {$reqlevel < 20 && $reqlevel >= 10} {
+                # nodes protect level is for editing, for viewing lower it by 5 unless its privileged
+                incr reqlevel -5
+            }
         }
         *:create {
             set reqlevel 10
@@ -906,37 +936,54 @@ proc link {to text} {
 }
 
 proc showhistory {nodeid} {
+    http_auth node view $nodeid
     db eval {select name,tf(modified) as modified,modified_by, content from nodes where id=$nodeid} {}
-    if {[info exists name]} {
-        set title "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
-    } elseif {[db exists {select id from history where original=$nodeid limit 1}]} {
-        set title "Node is deleted<br><br>"
-    } else {
+    if {![info exists name] && ![db exists {select id from history where original=$nodeid limit 1}]} {
         http_error 404 "no such node"
     }
-    http_auth node view $nodeid
     http_header
     html_head "History for node $nodeid"
     puts "<h1>Revision history for node $nodeid</h1><br>"
-    puts $title
+    if {![info exists name]} {
+        puts "Node is deleted<br><br>"
+    } else {
+        puts "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
+    }
 
     puts "<table><th>Rev</th><th>Created</th><th>By</th><th>Line &#916;</th><th>Compare</th></tr>"
-    set i [db eval {select count(original) from history where original=$nodeid}]
-    puts "<tr><td align=center>[link node:$nodeid [expr {$i + 1}]]</td><td align=center>$modified</td><td>$modified_by</td>"
+    set i [db eval {select count(original)-1 from history where original=$nodeid}]
 
-    set nextlines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
-    set nextid [db eval {select id from history where original=$nodeid order by created desc limit 1}]
 
+    set history [list]
     db eval {select id,type,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
-        set lines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
-        if {$nextid == $id} {
-            puts "<td align=center>[expr {$nextlines - $lines}]</td><td align=right>[link diff:curr:$id prev]</td></tr>"
-        } else {
-            puts "<td align=center>[expr {$nextlines - $lines}]</td><td>[link diff:curr:$nextid current] [link diff:$nextid:$id prev]</td></tr>"
-        }
+        lappend history [list $id $type $created $created_by $content]
+    }
+
+    #puts "<tr><td align=center>[link node:$nodeid [expr {$i + 1}]]</td><td align=center>$modified</td><td>$modified_by</td>"
+    #set nextid [db eval {select id from history where original=$nodeid order by created desc limit 1}]
+    #set nextid [lindex $history 1 0]
+
+
+    if {![info exists name]} {
+        puts "<tr><td align=center>-</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
+        set nextid [lindex $history 0 0]
+        set nextlines 0
+    } else {
+        puts "<tr><td align=center>[link node:$nodeid [expr {$i+1}]]</td><td>$modified</td><td>$modified_by</td>"
+        set nextid [lindex $history 0 0]
+        set nextlines [expr {[llength [regexp -all -inline {[^\n]\n} [lindex $history 0 4]]] + 1}]
+        puts "<td align=center>?</td><td align=right>[link diff:curr:[lindex $history 0 0] prev]</td></tr>"
+        puts "<tr><td align=center>[link viewhistory:[lindex $history 0 0] $i]</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
+    }
+
+    foreach x [lrange $history 1 end] {
+        set id [lindex $x 0]
+        set lines [expr {[llength [regexp -all -inline {[^\n]\n} [lindex $x 4]]] + 1}]
+        puts "<td align=center>[expr {$nextlines - $lines}]</td><td>[link diff:curr:$nextid current] [link diff:$id:$nextid prev]</td></tr>"
+
+        puts "<tr><td align=center>[link viewhistory:$id $i]</td><td>[lindex $x 2]</td><td>[lindex $x 3]</td>"
         set nextlines $lines
         set nextid $id
-        puts "<tr><td align=center>[link viewhistory:$id $i]</td><td>$created</td><td>$created_by</td>"
         incr i -1
     }
     puts "<td align=center><b>$lines</b></td><td>[link diff:curr:$id current]</td></tr></table>"
@@ -981,7 +1028,7 @@ proc showfile {id} {
 	if (confirm(\"Delete file\\n$name?\")) { document.forms\[0].action = \"[myself]/delete:$id\"; document.forms\[0].submit(); }
         }
         </script>"
-    set size [expr {[file exists $filename] ? [fsize [file size $filename]] : "file not found"}]
+    set size [expr {[file exists $filename] ? [format_filesize [file size $filename]] : "file not found"}]
     puts "<h1>File Information: $name</h1><br><br>
          <form method='POST' enctype='multipart/form-data' action='[myself]/upload:$id'>
          <table><tr><td>Name:</td><td><input type=text name=name value=\"$name\" size=60></td></tr>
@@ -1092,7 +1139,7 @@ proc th {names} {
 
 proc filelist {} {
     http_auth auth verify
-    db function fsize {file size}
+    db function fsize {file_size}
     get_input a
     http_header
     html_head "File list"
@@ -1110,16 +1157,21 @@ proc filelist {} {
          <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
          <th><a href=\"?sort=size\" style=\"text-decoration: none;\">Size</a></th></tr>"
     db eval "select id,name,filename,tf(created) as created,tf(modified) as modified from files order by $order" {
-        set size [expr {[file exists $filename] ? [fsize [file size $filename]] : ""}]
+        set size [expr {[file exists $filename] ? [format_filesize [file size $filename]] : ""}]
         puts "<tr><td>[link file:$id $name]</td><td><a href=\"[path_to_uri $filename]\">[file tail $filename]</a></td>
              <td>$created</td><td>$modified</td><td>$size</td></tr>"
     }
     puts "</table>"
 }
 
+proc file_size {file} {
+    if {![file exists $file]} { return 0 }
+    return [file size $file]
+}
+
 # nicely formats a file size
 # input: size in bytes
-proc fsize {size} {
+proc format_filesize {size} {
     if {$size > pow(2,20)} {
         return [format %5.2fM [expr {$size / pow(2,20)}]]
     }
@@ -1264,9 +1316,9 @@ proc parse_static {id data} {
     }
     #eval lappend indices [regexp -all -inline -indices {<script.*?</script>} $data]
     #set indices [lsort -decreasing -index 0 $indices]
-    foreach x $indices {
-        set y [lindex $x 1]
-        set x [lindex $x 0]
+    foreach {x y} $indices {
+        #set y [lindex $x 1]
+        #set x [lindex $x 0]
         lappend saved [string range $data $x $y]
         set data [string replace $data $x $y @PASS@]
     }
@@ -1516,7 +1568,7 @@ proc static_call {id cmd data} {
             }
         }
         img {
-            regexp {(.*) (\d+x\d+)$} $data -> data tns
+            regexp {(.*) (\d+x\d+|icon|small|med(?:ium)?|large)$} $data -> data tns
             if {[string is integer $data]} {
                 db eval {select id as imgid,name,filename from files where id=$data} {}
             } elseif {![string match {*://*} $data]} {
@@ -1528,6 +1580,7 @@ proc static_call {id cmd data} {
             db eval {insert or ignore into links (node,type,target) values($id,'file',$imgid)}
 
             if {[info exists tns]} {
+                set tns [string map {icon 32x32 small 100x100 med 200x200 medium 200x200 large 640x480} $tns]
                 set ofn $filename
                 set filename [file dirname $filename]/thumbs/[file rootname [file tail $filename]]_$tns[file extension $filename]
                 if {![file exists $filename]} {
@@ -1584,6 +1637,7 @@ proc dynamic_variable {var} {
         ID { upvar 2 id id; return $id }
         NAME { upvar 2 name name; return [filter_html $name] }
         PATH { return [file dirname $::request(PATH_INFO)]/ }
+        WIKI { return [myself] }
         TAGS {
             upvar 2 id id
             set out [list]
@@ -1592,6 +1646,7 @@ proc dynamic_variable {var} {
             }
             return [join $out]
         }
+        USER { return $::request(USER) }
         LOGIN {
             if {$::request(USER_AUTH)]} {
                 return "logged in as $::request(USER) - <a href=\"[myself]/wiki:logout\">logout</a>"
@@ -1630,7 +1685,7 @@ proc setup_interp {} {
     #interp alias $i proc {} procwrapper $i
     interp alias $i sql {} interp invokehidden $i db eval
     interp alias $i puts {} append output
-    foreach x {myself link fsize get_input filter_html unescape format_time db_auth} {
+    foreach x {myself link format_filesize get_input filter_html unescape format_time db_auth} {
         interp alias $i $x {} $x
     }
     interp eval $i {
@@ -1777,7 +1832,7 @@ proc savepage {id} {
             db eval {select tf(modified) as modified,modified_by from nodes where id=$id} {}
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
-        if {![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $protect }
+        if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $protect }
         if {$input(content) == $content} {
             fts eval {update search set name=$input(name),protect=$input(protect) where id=$id}
             db eval {update nodes set name=$input(name),protect=$input(protect) where id=$id}
@@ -1791,6 +1846,8 @@ proc savepage {id} {
         if {$input(content) == "delete"} {
             db eval {delete from nodes where id=$id}
             fts eval {delete from search where id=$id}
+            set user "$::request(USER)@$::request(REMOTE_ADDR)"
+            db eval {insert into history (original,type,content,created,created_by) values($id,'full','',datetime('now'),$user)}
             db eval {commit transaction}
             location {}
             return
@@ -1839,7 +1896,7 @@ proc showpagebyname {name} {
     set name [unescape $name]
     set id [db eval {select id from nodes where lower(name)=lower($name)}]
     if {$id == ""} {
-        editpage new $name
+        editnode new $name
     } else {
         #location node:$id
         showpage $id
@@ -1900,7 +1957,7 @@ proc service_request {} {
     if {$::request(REQUEST_METHOD) == "GET"} {
         switch -exact -- $cmd {
             index.html { wikitag home }
-            edit { editpage $arg }
+            edit { editnode $arg }
             node { showpage $arg }
             file { showfile $arg }
             tag  { showtag $arg }
@@ -1914,7 +1971,7 @@ proc service_request {} {
                     files { filelist }
                     tags { taglist }
                     upload { upload }
-                    new { editpage new }
+                    new { editnode new }
                     search { search }
                     config { editconfig }
                     prefs { editprefs }
