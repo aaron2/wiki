@@ -152,7 +152,7 @@ proc editor {userlevel objectlevel action name content back} {
 # returns: nothing
 proc editnode {id args} {
     if {$id == "new"} {
-        set leve [http_auth node create]
+        set level [http_auth node create]
         http_header
         html_head "Creating new page"
         puts "<h1>Creating new page</h1><br>"
@@ -1981,7 +1981,7 @@ proc service_request {} {
                     default { wikitag $arg }
                 }
             }
-            default { showpagebyname $cmd }
+            default { showpagebyname [join $doc :] }
         }
     } elseif {$::request(REQUEST_METHOD) == "POST"} {
         db eval {begin transaction}
