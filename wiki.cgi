@@ -937,7 +937,7 @@ proc link {to text} {
 
 proc showhistory {nodeid} {
     http_auth node view $nodeid
-    db eval {select name,tf(modified) as modified,modified_by, content from nodes where id=$nodeid} {}
+    db eval {select name,tf(modified) as modified,modified_by,content as currcontent from nodes where id=$nodeid} {}
     if {![info exists name] && ![db exists {select id from history where original=$nodeid limit 1}]} {
         http_error 404 "no such node"
     }
@@ -951,28 +951,23 @@ proc showhistory {nodeid} {
     }
 
     puts "<table><th>Rev</th><th>Created</th><th>By</th><th>Line &#916;</th><th>Compare</th></tr>"
-    set i [db eval {select count(original)-1 from history where original=$nodeid}]
-
 
     set history [list]
     db eval {select id,type,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
         lappend history [list $id $type $created $created_by $content]
     }
-
-    #puts "<tr><td align=center>[link node:$nodeid [expr {$i + 1}]]</td><td align=center>$modified</td><td>$modified_by</td>"
-    #set nextid [db eval {select id from history where original=$nodeid order by created desc limit 1}]
-    #set nextid [lindex $history 1 0]
-
+    set i [expr {[llength $history] - 1}]
 
     if {![info exists name]} {
-        puts "<tr><td align=center>-</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
         set nextid [lindex $history 0 0]
         set nextlines 0
+        puts "<tr><td align=center>-</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
     } else {
-        puts "<tr><td align=center>[link node:$nodeid [expr {$i+1}]]</td><td>$modified</td><td>$modified_by</td>"
         set nextid [lindex $history 0 0]
         set nextlines [expr {[llength [regexp -all -inline {[^\n]\n} [lindex $history 0 4]]] + 1}]
-        puts "<td align=center>?</td><td align=right>[link diff:curr:[lindex $history 0 0] prev]</td></tr>"
+        set lines [expr {[llength [regexp -all -inline {[^\n]\n} $currcontent]] + 1}]
+        puts "<tr><td align=center>[link node:$nodeid [expr {$i+1}]]</td><td>$modified</td><td>$modified_by</td>"
+        puts "<td align=center>[expr {$lines - $nextlines}]</td><td align=right>[link diff:curr:[lindex $history 0 0] prev]</td></tr>"
         puts "<tr><td align=center>[link viewhistory:[lindex $history 0 0] $i]</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
     }
 
