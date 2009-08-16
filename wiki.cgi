@@ -1300,107 +1300,176 @@ proc html_head {title} {
 # input: node id and contents
 # returns: node content with static html
 proc parse_static {id data} {
-    # remove anything like %word{ }% and save it to replace after other parsing
-    set indices {}
-    foreach i [regexp -all -inline -indices {%[a-z]{3,7}?\{.*?\}%} $data] {
-        set indices [eval linsert [list $indices] 0 $i]
-    }
-    foreach {x y} $indices {
-        lappend saved [string range $data $x $y]
-        set data [string replace $data $x $y @PASS@]
-    }
-    #eval lappend indices [regexp -all -inline -indices {<script.*?</script>} $data]
-    #set indices [lsort -decreasing -index 0 $indices]
-    foreach {x y} $indices {
-        #set y [lindex $x 1]
-        #set x [lindex $x 0]
-        lappend saved [string range $data $x $y]
-        set data [string replace $data $x $y @PASS@]
-    }
-
-    set data [string map {[ &#91; \{ &#123; \} &#125; $ &#36;} $data]
-
-    # link:(name)
-    set data [regsub -all {\m([a-z]{3,7}):\(([^\)]+)\)} $data "\[static_call $id \{\\1\} \{\\2\}]"]
-
-    # link:id
-    set data [regsub -all {\m([a-z]{3,7}):([[:digit:]]+)} $data "\[static_call $id \{\\1\} \{\\2\}]"]
-
-    # proto:// external links
-    #set data [regsub -all           {(\([^\(\)]+\):)?[a-z]{3,7}://[^       \"\n<]+} $data {[static_http {\0}]}]
-    set data [regsub -all {([\s\|^])((\([^\(\)]+\):)?[a-z]{3,7}://[^	 \"\n<]+)} $data {\1[static_http {\2}]}]
-
-    # pre and ul,ol lists
-    #set data [regsub -all {((\n|\A)  +[^\n]*){1,}} $data "\n\[static_lists \{\\0\}\]"]
-    set data [regsub -all {((\n|\A)  +[^\n]*){1,}} $data "\n\[static_lists \{\\0\}\]"]
-
-    # |tables|
-    #set data [regsub -all {(\n\|[^\n]+\|){1,}} $data {[static_table {\0}]}]
-    set data [regsub -all -line {(^\|.+\|($|\n))+} $data {[static_table {\0}]}]
-
-    # ?option: vals
-    set data [regsub -all -line {^\?([a-z]{3,10}):(.*)$} $data "\[static_options $id \{\\1\} \{\\2\}]"]
-
-    # hr
-    set data [regsub -all -line {^----*$} $data "<hr>"]
-
-    # _italic_
-    #set data [regsub -all {([^\w])_([^ _][^_]*[^ _])_([^\w])} $data {\1<i>\2</i>\3}]
-    #set data [regsub -all {_(?!\s)([^_]*[^_ ])_(?![[:alnum:]])} $data {<i>\1</i>}]
-    set data [regsub -all {\m_(?!\s)([^_]*[^_ ])_(?![[:alnum:]])} $data {<i>\1</i>}]
-
-    # *bold*
-    #set data [regsub -all {([^\w])\*([^ \*][^\*]*[^ \*])\*([^\w])} $data {\1<b>\2</b>\3}]
-    #set data [regsub -all  {\*(?!\s)([^*]*[^_ ])\*(?![[:alnum:]])} $data {<b>\1</b>}]
-    set data [regsub -all -linestop  {\Y\*(?!\s\")([^\*]*[^\* ])\*(?![[:graph:]])} $data {<b>\1</b>}]
-
-    # =fixed=
-    #set data [regsub -all {([\s\*\+_])=([^ =][^=]*[^ =])=([\s\*_\+])} $data {\1<span class=fixed>\2</span>\3}]
-    #set data [regsub -all {=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class =fixed>\1</span>}]
-    #set data [regsub -all {(?=[\s\*\+_^])=(?!\s)([^=]+)=(?![[:alnum:]>\"])} $data {<span class=fixed>\1</span>}]
-    #set data [regsub -all -linestop {(?=[\s\^])=(?!\s\")([^=]*[^= ])=(?![[:graph:]])} $data {<span class=fixed>\1</span>}]
-    set data [regsub -all -linestop  {\Y=(?!\s\")([^=]*[^= ])=(?![[:graph:]])} $data {<span class=fixed>\1</span>}]
-
-    # +++headings+
-    set data [regsub -all -line {^\+{1,5}.+\+$} $data {[static_heading {\0}]}]
-
-    # +paragraph\n\n
-    #set data [regsub -all {\n\+([[:alnum:]].*?)\n\n} $data "\n<p>\\1</p>"]
-    set data [regsub -all {(?w)^\+(.*?)(?=\n\n|\Z)(?:\n|\Z)} $data {<p>\1</p>}]
-
-    # %variables%
-    set data [regsub -all {%([A-Z]{3,10})%} $data {[static_variable {\1}]}]
-
-    # line breaks
-    set data [string map {\n\n\n\n <br><br><br>\n \n\n\n <br><br>\n \n\n <br>\n} $data]
-
-
-    set data [subst -nobackslashes -novariables $data]
-
-    # replace what we saved at the beginning
-    if {[info exists saved]} {
-        set indices {}
-        foreach i [regexp -all -inline -indices {@PASS@} $data] {
-            set indices [eval linsert [list $indices] 0 $i]
+    set data [split $data \n]
+    set state "NONE"
+    set curblock [list]
+    set blocks [list]
+    foreach line $data {
+        if {$state != "NONE"} {
+            if {[check_end_sequence $state line]} {
+                if {$state == "VAR" || $state == "SCRIPT" || $state == "PREHTML"} {
+                    lappend curblock $line
+                    state_changed state NONE curblock blocks
+                    continue
+                }
+                state_changed state NONE curblock blocks
+                #if {$line == ""} { continue }
+                state_changed state [check_start_sequence $id $state line] curblock blocks
+            }
+        } elseif {$line != ""} {
+            state_changed state [check_start_sequence $id $state line] curblock blocks
         }
-        set i 0
-        foreach {x y} $indices {
-            set pass [lindex $saved $i]
-            set data [string replace $data $x $y $pass]
-            incr i
+        lappend curblock $line
+        #puts "$state [string trimright $line]"
+    }
+    lappend blocks $state $curblock
+    parse_blocks $id $blocks
+}
+
+proc check_start_sequence {id state l} {
+    #puts "check starts"
+    upvar $l line
+    if {[string match {\?*: *} $line]} {
+        set line [static_options $id tags $line]
+    } elseif {[string match +*+ $line]} {
+        set line [static_heading $line]
+    } elseif {[regexp {^---+$} $line]} {
+        set line <hr>
+
+    } elseif {[string match "|*|" $line]} {
+        return TABLE
+    } elseif {[string match "%*\{" $line]} {
+        return VAR
+    } elseif {[string match "*<script*" $line]} {
+        return SCRIPT
+    } elseif {[regexp {^  *[*1]+ } $line]} {
+        return LIST
+    } elseif {[string match *<pre>* $line]} {
+        return PREHTML
+    } elseif {[string match "  *" $line]} {
+        return PRE
+    } elseif {[regexp {^\s*\+.*[^+]$} $line]} {
+        set line [string range $line 1 end]
+        return PARA
+    }
+    return $state
+}
+
+proc check_end_sequence {state l} {
+    upvar $l line
+    if { ($state == "PRE"     && [regexp {^\S} $line])          || \
+         ($state == "PREHTML" && [string match *</pre>* $line]) || \
+         ($state == "LIST"    && [regexp {^\S*$} $line])        || \
+         ($state == "TABLE"   && ![string match "|*|" $line])   || \
+         ($state == "PARA"    && [regexp {^ *$} $line])         || \
+         ($state == "VAR"     && $line == "\}%")                || \
+         ($state == "SCRIPT"  && $line == "</script>")
+    } {
+        return 1
+    }
+    return 0
+}
+
+proc state_changed {s new c b} {
+    upvar $s state
+    upvar $c curblock
+    upvar $b blocks
+    if {$new != $state} {
+        if {$curblock != ""} {
+            #puts "state changed: $state -> $new"
+            lappend blocks $state $curblock
+            set curblock [list]
+        }
+        set state $new
+    }
+}
+
+proc parse_blocks {id blocks} {
+exec echo [join $blocks \n] >> log
+    set output ""
+    foreach {type block} $blocks {
+        #puts $type
+        #puts $block
+        #continue
+        set block [join $block \n]
+        switch -exact -- $type {
+            TABLE {
+                set block [text_formatting $block]
+                set block [static_links $id $block]
+                append output [static_table $block]
+            }
+            PARA {
+                set block [text_formatting $block]
+                set block [static_links $id $block]
+                append output "<p>$block</p>\n"
+            }
+            LIST {
+                set block [text_formatting $block]
+                set block [static_links $id $block]
+                append output [static_lists $block]
+            }
+            VAR {
+                append output $block
+            }
+            SCRIPT {
+                append output $block
+            }
+            PRE {
+                append output "<pre>\n$block\n</pre>\n"
+            }
+            PREHTML {
+                #set block [text_formatting $block]
+                #set block [parse2 $id $block]
+                append output $block
+            }
+            NONE {
+                set block [text_formatting $block]
+                set block [static_links $id $block]\n
+                set block [string map {\n\n\n\n "<br /><br /><br />\n" \n\n\n "<br /><br />\n" \n\n "<br />\n"} $block]
+                append output $block
+            }
         }
     }
     if {$::settings(FILTER_HTML)} {
         set data [filter_white_html $data]
     }
+    return $output
+}
+
+proc static_links {id data} {
+    foreach x [lreverse [regexp -all -inline -indices -nocase {%[a-z]*?%} $data]] {
+        set var [string trim [string range $data {*}$x] %]
+        set t [time {set data [string replace $data {*}$x [static_variable $var]]}]
+    }
+    foreach {x junk} [lreverse [regexp -all -inline -indices {(?:[\s\|^])((?:\([^\(\)]+\):)?[a-z]{3,7}://[^[:space:]\"\n<]+)} $data]] {
+        set url [string range $data {*}$x]
+        set data [string replace $data {*}$x [static_http $url]]
+    }
+    foreach {linkid target name all} [lreverse [regexp -all -inline -indices {\m([a-z]{3,7}):(?:\(([^\)]+)\)|([[:digit:]]+))} $data]] {
+        if {$target == "-1 -1"} { set target $linkid }
+        set res [static_call $id [string range $data {*}$name] [string range $data {*}$target]]
+        set data [string replace $data {*}$all $res]
+    }
+
+    return $data
+}
+
+proc text_formatting {data} {
+    # _italic_
+    set data [regsub -all {\m_(?!\s)([^_]*[^_ ])_(?![[:alnum:]])} $data {<i>\1</i>}]
+
+    # *bold*
+    set data [regsub -all -linestop  {\Y\*(?!\s\")([^\*]*[^\* ])\*(?![[:graph:]])} $data {<b>\1</b>}]
+
+    # =fixed=
+    set data [regsub -all -linestop  {\Y=(?!\s\")([^=]*[^= ])=(?![[:graph:]])} $data {<span class=fixed>\1</span>}]
+
     return $data
 }
 
 proc static_table {data} {
-    set data [split [subst [string map {\" \\\"} $data]] \n]
-    if {[lindex $data end] == ""} { set data [lrange $data 0 end-1] }
     set t "\n<table>\n"
-    foreach line $data {
+    foreach line [split $data \n] {
         append t "<tr>"
         foreach x [lrange [split $line |] 1 end-1] {
             set tag td
@@ -1438,14 +1507,24 @@ proc static_table {data} {
 proc static_variable {var} {
     switch -exact -- $var {
         TOC {
-            upvar data data
-            set headings [list {}]
-            foreach {crap x} [regexp -all -inline {\[static_heading \{(.*?)\}\]} $data] {
-                set depth [expr {[string length $x] - [string length [string trimleft $x +]]}]
-                set x [string trim $x +]
-                lappend headings "  [string repeat 1 $depth] <a href=#[string map {" " _} $x]>$x</a>"
+            upvar 2 blocks blocks
+            set found [list]
+            set mindepth 99
+            foreach {type data} $blocks {
+                if {$type != "NONE"} { continue }
+                foreach {all link depth name} [regexp -all -inline {<a name=(.*?)><h(\d)>(.*?)<} [join $data]] {
+                    set link [string trim $link \"']
+                    set name [string trim $name]
+                    #lappend headings "  [string repeat 1 $depth] <a href=#$link>$name</a>"
+                    lappend found $depth $link $name
+                    if {$depth < $mindepth} { set mindepth $depth }
+                }
             }
-            if {[info exists headings]} {
+            if {$found != ""} {
+                set subtract [expr {1 - $mindepth}]
+                foreach {depth link name} $found {
+                    lappend headings "  [string repeat 1 [expr {$depth + $subtract}]] <a href=\"#$link\">$name</a>"
+                }
                 return "<div class=toc>\n[static_lists [join $headings \n]]</div>\n"
             }
         }
@@ -1468,7 +1547,7 @@ proc static_heading {data} {
 proc static_options {id opt data} {
     switch -exact -- $opt {
         tags {
-            foreach x [split $data] {
+            foreach x [lrange [split $data] 1 end] {
                 if {$x == ""} { continue }
                 if {[string match wiki:* $x]} {
                     upvar 2 level level
@@ -1498,7 +1577,6 @@ proc static_http {data} {
 }
 
 proc static_lists {data} {
-    set data [subst [string map {\" \\\" \\ \\\\} $data]]
     set data [split $data \n]
     if {[lindex $data 0] == ""} { set data [lrange $data 1 end] }
 
