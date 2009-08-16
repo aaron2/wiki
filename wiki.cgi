@@ -122,6 +122,7 @@ proc editor {userlevel objectlevel action name content back} {
                   c.rows = document.body.clientHeight / lineHeight;
                   c.rows -= (document.body.scrollHeight - document.body.clientHeight) / lineHeight;
               }
+              if (c.rows < 7) { c.rows = 7; }
           }
           window.onresize = maxSize;
           window.onload = maxSize;
@@ -1287,7 +1288,7 @@ proc location {loc args} {
 proc html_head {title} {
     puts "<head>\n<title>$title</title>"
     db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {
-    #    set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
+        #set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
         puts "<style>\n$parsed\n</style>\n"
     }
     #foreach x [glob -nocomplain includes/*.css] {
@@ -1541,7 +1542,7 @@ proc static_variable {var} {
 proc static_heading {data} {
     set size [expr {[string length $data] - [string length [string trimleft $data +]]}]
     set data [string trim $data +]
-    return "<a name=[string map {" " _} [string trim $data]]><h$size>$data</h$size></a>\n"
+    return "<a name=[string map {" " _} [string trim $data]]><h$size>$data</h$size></a>"
 }
 
 proc static_options {id opt data} {
@@ -1597,15 +1598,15 @@ proc static_lists {data} {
                     if {$x != $y} break
                     incr i
                 }
-                append ret [string map {* </ul> 1 </ol>} [string range $last $i end]]\n
-                append ret [string map {* <ul> 1 <ol>} [string range $now $i end]]\n
+                append ret [string map {* </ul>\n 1 </ol>\n} [string range $last $i end]]
+                append ret [string map {* <ul>\n 1 <ol>\n} [string range $now $i end]]
                 set last $now
             }
             set line [lrange $line 1 end]
         }
-        append ret <li>[string trim [join $line]]\n
+        append ret <li>[string trim [join $line]]</li>\n
     }
-    append ret [string map {* </ul> 1 </ol>} $last]\n
+    append ret [string map {* </ul>\n 1 </ol>\n} $last]
     return $ret
 }
 
@@ -1647,7 +1648,7 @@ proc static_call {id cmd data} {
             } elseif {![string match {*://*} $data]} {
                 db eval {select id as imgid,name,filename from files where name=$data order by modified,created desc limit 1} {}
             } else {
-                return "<img src=\"$data\" alt=\"$data\">"
+                return "<img src=\"$data\" alt=\"$data\" />"
             }
             if {![info exists filename]} { return "<i>image not found</i>" }
             db eval {insert or ignore into links (node,type,target) values($id,'file',$imgid)}
@@ -1659,9 +1660,9 @@ proc static_call {id cmd data} {
                 if {![file exists $filename]} {
                     catch {exec /usr/local/bin/convert -scale $tns $ofn $filename}
                 }
-                return "<a href=[path_to_uri $ofn]><img src=[path_to_uri $filename] alt=\"$name\"></a>"
+                return "<a href=\"[path_to_uri $ofn]\"><img src=\"[path_to_uri $filename]\" alt=\"$name\" /></a>"
             }
-            return "<img src=[path_to_uri $filename] alt=\"$name\">"
+            return "<img src=\"[path_to_uri $filename]\" alt=\"$name\" />"
         }
         tag {
             return [link tag:$data $data]
@@ -1745,10 +1746,10 @@ proc procwrapper {i name myargs body} {
 
 proc db_auth {action table col db view} {
     if {$action == "SQLITE_READ" && ($view != "pages" && $table != "pages" && $table != "tags" && $table != "links" && $table != "files")} {
-#puts "DENY $action $table $col $db $view<br>"
+        #puts "DENY $action $table $col $db $view<br>"
         return SQLITE_DENY
     }
-#puts "OK $action $table $col $db $view<br>"
+    #puts "OK $action $table $col $db $view<br>"
     return SQLITE_OK
 }
 
@@ -1806,9 +1807,9 @@ proc subst_commands {id var} {
                 } else {
                     set output [join [interp eval $i [list sql {select parsed from pages where name=$__inc}]]]
                 }
+                set output "<div class=include>$output</div>"
             }
         }
-        set output "<div class=include>$output</div>"
         set data [string replace $data [lindex $all_i 0] [lindex $all_i 1] $output]
     }
     interp delete $i
@@ -1998,7 +1999,7 @@ proc open_databases {} {
     #package require sqlite3
     load /usr/local/lib/sqlite3.5.1/libsqlite3.5.1.so Sqlite3
     #set dir [file dirname [pwd]]
-set dir [pwd]
+    set dir [pwd]
     sqlite3 db [file join $dir wiki.db]
     sqlite3 fts [file join $dir fts.db]
     fts eval {PRAGMA synchronous = OFF}
