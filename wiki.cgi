@@ -721,7 +721,7 @@ proc do_login {} {
     }
     set user $input(username)
     set pass $input(password)
-    set ip $::env(REMOTE_ADDR)
+    set ip $::request(REMOTE_ADDR)
     set expires $::settings(EXPIRES)
     if {![db exists {select user from users where user=$user and password=password($pass) and password<>''}]} {
         location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
@@ -1024,16 +1024,17 @@ proc showfile {id} {
 	if (confirm(\"Delete file\\n$name?\")) { document.forms\[0].action = \"[myself]/delete:$id\"; document.forms\[0].submit(); }
         }
         </script>"
-    set size [expr {[file exists $filename] ? [format_filesize [file size $filename]] : "file not found"}]
+    set filepath [filepath $filename]
+    set size [expr {[file exists $filepath] ? [format_filesize [file size $filepath]] : "file not found"}]
     puts "<h1>File Information: $name</h1><br><br>
          <form method='POST' enctype='multipart/form-data' action='[myself]/upload:$id'>
          <table><tr><td>Name:</td><td><input type=text name=name value=\"$name\" size=60></td></tr>
-         <tr><td>Filename:</td><td>[file tail $filename]</td></tr>
+         <tr><td>Filename:</td><td>$filename</td></tr>
          <tr><td>Size:</td><td>$size</td></tr>
          <tr><td>Original name:</td><td>$original_name</td></tr>
          <tr><td>Created:</td><td>$created</td></tr>
          <tr><td>Modified:</td><td>$modified</td></tr>
-         <tr><td>Link:</td><td><a href=\"[path_to_uri $filename]\">[file tail $filename]</a></td></tr>
+         <tr><td>Link:</td><td><a href=\"files/$filename\">$filename</a></td></tr>
          <tr><td colspan=2 align=center><input type=file name=filedata size=60><br>
          <input type=submit value=Update>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
          <input type=button onclick=javascript:confirmation() value=Delete></td></tr>
@@ -1045,7 +1046,7 @@ proc showfile {id} {
     }
     if {![info exists name]} { puts "None<br>" }
     if {[regexp -nocase {\.(jpe?g|bmp|png|gif)$} $filename]} {
-        puts "<br><br><center><img src=\"[path_to_uri $filename]\"></center>"
+        puts "<br><br><center><img src=\"files/$filename\"></center>"
     }
 }
 
@@ -1153,14 +1154,16 @@ proc filelist {} {
          <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
          <th><a href=\"?sort=size\" style=\"text-decoration: none;\">Size</a></th></tr>"
     db eval "select id,name,filename,tf(created) as created,tf(modified) as modified from files order by $order" {
-        set size [expr {[file exists $filename] ? [format_filesize [file size $filename]] : ""}]
-        puts "<tr><td>[link file:$id $name]</td><td><a href=\"[path_to_uri $filename]\">[file tail $filename]</a></td>
+        set filepath [filepath $filename]
+        set size [expr {[file exists $filepath] ? [format_filesize [file size $filepath]] : ""}]
+        puts "<tr><td>[link file:$id $name]</td><td><a href=\"files/$filename\">$filename</a></td>
              <td>$created</td><td>$modified</td><td>$size</td></tr>"
     }
     puts "</table>"
 }
 
 proc file_size {file} {
+    set file [filepath $file]
     if {![file exists $file]} { return 0 }
     return [file size $file]
 }
@@ -1232,7 +1235,7 @@ proc upload_post {id} {
         set tail [file tail [string map {\\ /} $original]]
         set tail [regsub {\[1\]\.} $tail .]
         if {$name == ""} { set name [file rootname $tail] }
-        set base [file dirname $::request(PATH_TRANSLATED)]/files/
+        set base [filepath]
         set tail [string map {" " _} $tail]
         #set filename [file join $base $tail]
         #set num 1
@@ -1252,7 +1255,7 @@ proc upload_post {id} {
             return
         }
         # otherwise overwrite the existing file
-        set filename [join [db eval {select filename from files where id=$id}]]
+        set filename [file join $base [db onecolumn {select filename from files where id=$id}]]
     }
 
     set fh [open $filename w]
@@ -1261,6 +1264,7 @@ proc upload_post {id} {
     close $fh
 
     if {$id == "new"} {
+        set filename [file tail $filename]
         db eval {insert into files (name,original_name,filename,created,modified) values($name,$original,$filename,datetime('now'),datetime('now'))}
         db eval {commit transaction}
         location file:[db last_insert_rowid]
@@ -1655,14 +1659,14 @@ proc static_call {id cmd data} {
 
             if {[info exists tns]} {
                 set tns [string map {icon 32x32 small 100x100 med 200x200 medium 200x200 large 640x480} $tns]
-                set ofn $filename
-                set filename [file dirname $filename]/thumbs/[file rootname [file tail $filename]]_$tns[file extension $filename]
-                if {![file exists $filename]} {
-                    catch {exec /usr/local/bin/convert -scale $tns $ofn $filename}
+                set path [filepath]
+                set thumb $path/thumbs/[file rootname $filename]_$tns[file extension $filename]
+                if {![file exists $thumb]} {
+                    catch {exec /usr/local/bin/convert -scale $tns $path/$filename $thumb}
                 }
-                return "<a href=\"[path_to_uri $ofn]\"><img src=\"[path_to_uri $filename]\" alt=\"$name\" /></a>"
+                return "<a href=\"files/$filename\"><img src=\"files/thumbs/[file tail $thumb]\" alt=\"$name\" /></a>"
             }
-            return "<img src=\"[path_to_uri $filename]\" alt=\"$name\" />"
+            return "<img src=\"files/$filename\" alt=\"$name\" />"
         }
         tag {
             return [link tag:$data $data]
@@ -1686,8 +1690,10 @@ proc static_call {id cmd data} {
     }
 }
 
-proc path_to_uri {path} {
-    return [regsub "^$::request(DOCUMENT_ROOT)" $path {}]
+proc filepath {file} {
+    set path [join [lrange [split $::request(PATH_TRANSLATED) /] 0 end-1] /]/files
+    if {$file != ""} { append path /$file }
+    return $path
 }
 
 # performs parsing of node contents at display time
@@ -1710,7 +1716,7 @@ proc dynamic_variable {var} {
         MODIFIEDBY { upvar 2 modified_by modified_by; return $modified_by }
         ID { upvar 2 id id; return $id }
         NAME { upvar 2 name name; return [filter_html $name] }
-        PATH { return [file dirname $::request(PATH_INFO)]/ }
+        PATH { return [string trimright [file dirname $::request(PATH_INFO)] /]/ }
         WIKI { return [myself] }
         TAGS {
             upvar 2 id id
@@ -1827,8 +1833,8 @@ proc call_dynamic {id cmd data} {
             #regexp {^([[:digit:]]+)(.*)} $data -> data rest
             db eval {select name,filename from files where id=$data} {}
             if {![info exists name]} { return [link wiki:upload upload] }
-            if {$name == ""} { set name [file tail $filename] }
-            return "<a href=\"[path_to_uri $filename]\" class=filelink>$name</a> <span class=fileinfo>([link file:$data info])</span>"
+            if {$name == ""} { set name $filename }
+            return "<a href=\"files/$filename\" class=filelink>$name</a> <span class=fileinfo>([link file:$data info])</span>"
         }
         default {
             return "$cmd: $data"
