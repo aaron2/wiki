@@ -197,12 +197,11 @@ proc httpd::setup {cgi port} {
 
     rename ::puts ::_puts
     proc ::puts {args} {
-        #_puts $args
-        if {[llength $args] == 1} {
-            lappend httpd::buf [string trimright [join $args] \n]
-        } else {
-            eval _puts $args
+        #eval _puts $args
+        if {[lindex $args 0] == "-nonewline"} {
+            set args [lrange $args 1 end]
         }
+        lappend httpd::buf [string trimright [join $args] \n]
     }
 
     close stdin
