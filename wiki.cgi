@@ -872,7 +872,7 @@ proc do_search {{q {}}} {
     append results "<h3>Tag results</h3>"
     db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and nodes.protect<=$level group by tags.node order by count(tags.name) desc" {
         if {$numterms == $count(tags.name)} { lappend matches $id }
-        append results "[link node:${tags.node} ${nodes.name}]&nbsp;&nbsp;&nbsp;<span class=tags>("
+        append results "[link node:$node $name]&nbsp;&nbsp;&nbsp;<span class=tags>("
         db eval {select name from tags where node=$id} {
             append results "[link tag:$name $name] "
         }
@@ -1769,7 +1769,7 @@ proc setup_interp {} {
         interp alias $i $x {} $x
     }
     interp eval $i {
-        load /usr/local/lib/sqlite3.5.1/libsqlite3.5.1.so Sqlite3
+        load /usr/local/lib/sqlite3.6.17/libsqlite3.6.17.so Sqlite3
         sqlite3 db wiki.db -readonly 1
         db function tf format_time
         db eval {create temp view pages as select * from nodes where protect<=20}
@@ -2003,7 +2003,7 @@ proc showlinks {id} {
 
 proc open_databases {} {
     #package require sqlite3
-    load /usr/local/lib/sqlite3.5.1/libsqlite3.5.1.so Sqlite3
+    load /usr/local/lib/sqlite3.6.17/libsqlite3.6.17.so Sqlite3
     #set dir [file dirname [pwd]]
     set dir [pwd]
     sqlite3 db [file join $dir wiki.db]
