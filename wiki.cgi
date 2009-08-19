@@ -957,7 +957,7 @@ proc showhistory {nodeid} {
     db eval {select id,type,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
         lappend history [list $id $type $created $created_by $content]
     }
-    set i [expr {[llength $history] - 1}]
+    set i [llength $history]
 
     if {![info exists name]} {
         set nextid [lindex $history 0 0]
@@ -971,6 +971,7 @@ proc showhistory {nodeid} {
         puts "<td align=center>[expr {$lines - $nextlines}]</td><td align=right>[link diff:curr:[lindex $history 0 0] prev]</td></tr>"
         puts "<tr><td align=center>[link viewhistory:[lindex $history 0 0] $i]</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
     }
+    incr i -1
 
     foreach x [lrange $history 1 end] {
         set id [lindex $x 0]
@@ -1390,7 +1391,6 @@ proc state_changed {s new c b} {
 }
 
 proc parse_blocks {id blocks} {
-exec echo [join $blocks \n] >> log
     set output ""
     foreach {type block} $blocks {
         #puts $type
@@ -1436,7 +1436,7 @@ exec echo [join $blocks \n] >> log
         }
     }
     if {$::settings(FILTER_HTML)} {
-        set data [filter_white_html $data]
+        set output [filter_white_html $output]
     }
     return $output
 }
