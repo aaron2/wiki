@@ -1541,7 +1541,7 @@ proc static_variable {var} {
         RED -
         GREEN -
         YELLOW -
-        ORANGE
+        ORANGE -
         PURPLE -
         AQUA -
         NAVY -
