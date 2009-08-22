@@ -884,7 +884,7 @@ proc do_search {{q {}}} {
 
         append results "[link node:$id $name]"
         if {[set tags [db eval {select name from tags where node=$id}]] != ""} {
-            append results "&nbsp;&nbsp;&nbsp;<span class=tags>("
+            append results "&nbsp;&nbsp;&nbsp;<span class=tags>( "
             foreach x $tags { append results "[link tag:$x $x] " }
             append results ")</span>"
         }
@@ -954,8 +954,8 @@ proc showhistory {nodeid} {
     puts "<table><th>Rev</th><th>Created</th><th>By</th><th>Line &#916;</th><th>Compare</th></tr>"
 
     set history [list]
-    db eval {select id,type,tf(created) as created,created_by,content from history where original=$nodeid order by created desc} {
-        lappend history [list $id $type $created $created_by $content]
+    db eval {select id,type,created,created_by,content from history where original=$nodeid order by created desc} {
+        lappend history [list $id $type [format_time $created] $created_by $content]
     }
     set i [llength $history]
 
@@ -992,8 +992,8 @@ proc viewhistory {id} {
     http_auth node view $original
     http_header
     html_head "History for node $original"
-    db eval {select tf(created) as nexttime,id as nextid from history where original=$original and created>$oc order by created limit 1} {}
-    set next [expr {![info exists nextid] ? "current" : [link viewhistory:$nextid $nexttime]}]
+    db eval {select created as nexttime,id as nextid from history where original=$original and created>$oc order by created limit 1} {}
+    set next [expr {![info exists nextid] ? "current" : [link viewhistory:$nextid [format_time $nexttime]]}]
 
     db eval {select name from nodes where id=$original} {}
     if {![info exists name]} {
@@ -1263,14 +1263,15 @@ proc upload_post {id} {
     fconfigure $fh -encoding binary -translation lf
     puts -nonewline $fh $filedata
     close $fh
+    set user "$::request(USER)@$::request(REMOTE_ADDR)"
 
     if {$id == "new"} {
         set filename [file tail $filename]
-        db eval {insert into files (name,original_name,filename,created,modified) values($name,$original,$filename,datetime('now'),datetime('now'))}
+        db eval {insert into files (name,original_name,filename,created,modified,modified_by) values($name,$original,$filename,datetime('now'),datetime('now'),$user)}
         db eval {commit transaction}
         location file:[db last_insert_rowid]
     } else {
-        db eval {update files set modified=datetime('now'),name=$name where id=$id}
+        db eval {update files set modified=datetime('now'),modified_by=$user,name=$name where id=$id}
         db eval {commit transaction}
         location file:$id
     }
@@ -1291,13 +1292,16 @@ proc location {loc args} {
 }
 
 proc html_head {title} {
-    puts "<head>\n<title>$title</title>"
+    puts "<html><head>\n<title>$title</title>"
     db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {
         #set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
         puts "<style>\n$parsed\n</style>\n"
     }
     #foreach x [glob -nocomplain includes/*.css] {
     #    puts "<link rel=stylesheet href=[myself]/$x>"
+    #}
+    #foreach x [glob -nocomplain includes/*.js] {
+    #    puts "<script href=[myself]/$x></script>"
     #}
     puts "</head><body>"
 }
@@ -1510,7 +1514,7 @@ proc static_table {data} {
 }
 
 proc static_variable {var} {
-    switch -exact -- $var {
+    switch -exact -nocase -- $var {
         TOC {
             upvar 2 blocks blocks
             set found [list]
@@ -1537,6 +1541,14 @@ proc static_variable {var} {
         RED -
         GREEN -
         YELLOW -
+        ORANGE
+        PURPLE -
+        AQUA -
+        NAVY -
+        PINK -
+        LIME -
+        BROWN -
+        GRAY -
         BLACK { return "<span style=\"color: [string tolower $var];\">" }
         ENDCOLOR { return "</span>" }
         default { return %$var% }
@@ -1645,6 +1657,7 @@ proc static_call {id cmd data} {
                 return [link wiki:upload upload]
             }
         }
+        image -
         img {
             regexp {(.*) (\d+x\d+|icon|small|med(?:ium)?|large)$} $data -> data tns
             if {[string is integer $data]} {
@@ -1703,7 +1716,7 @@ proc parse_dynamic {id data} {
     # escape special chars before subst
     set data [string map {[ \\[ \{ \\\{ \} \\\} $ \\$ \\ \\\\} $data]
     # %variables% - some of these are passed through static parsing
-    set data [regsub -all {%([A-Z]{2,10})%} $data {[dynamic_variable {\1}]}]
+    set data [regsub -all -nocase {%([A-Z]{2,10})%} $data {[dynamic_variable {\1}]}]
     # link:(id) and file:(id)
     set data [regsub -all {([a-z]{3,10}):\(([^\(\)]+)\)} $data "\[call_dynamic $id \{\\1\} \{\\2\}]"]
     set data [subst $data]
@@ -1711,7 +1724,7 @@ proc parse_dynamic {id data} {
 }
 
 proc dynamic_variable {var} {
-    switch -exact -- $var {
+    switch -exact -nocase -- $var {
         MODIFIED { upvar 2 modified modified; return [format_time $modified] }
         MODIFIEDBY { upvar 2 modified_by modified_by; return $modified_by }
         ID { upvar 2 id id; return $id }
