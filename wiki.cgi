@@ -393,6 +393,7 @@ proc saveprefs {} {
     }
     if {![info exists status]} { set status [list "Preferences saved"] }
     location wiki:prefs?status=[join $status ,]
+    db eval {rollback transaction}
 }
 
 # show the difference between 2 revisions
@@ -717,6 +718,7 @@ proc do_login {} {
     db function password {hash_pass}
     if {![info exists input(username)] || ![info exists input(password)]} {
         location wiki:login
+        db eval {rollback transaction}
         return
     }
     set user $input(username)
@@ -725,6 +727,7 @@ proc do_login {} {
     set expires $::settings(EXPIRES)
     if {![db exists {select user from users where user=$user and password=password($pass) and password<>''}]} {
         location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
+        db eval {rollback transaction}
         return
     }
 
@@ -852,6 +855,7 @@ proc do_search {{q {}}} {
     }
     if {![info exists input(string)] || $input(string) == ""} {
         location wiki:search
+        db eval {rollback transaction}
         return
     }
 
@@ -903,6 +907,7 @@ proc do_search {{q {}}} {
         puts "You are not logged in. It is likely you will see more results if you [link wiki:login "log in"]"
     } elseif {[llength $matches] == 1} {
         location node:[lindex $matches 0]
+        db eval {rollback transaction}
         return
     }
 
@@ -912,6 +917,7 @@ proc do_search {{q {}}} {
     } else {
         puts $results
     }
+    db eval {rollback transaction}
 }
 
 # shows a page listing all nodes tagged with a given tag
@@ -1011,6 +1017,7 @@ proc deletefile {id} {
     db eval {select filename from files where id=$id} {}
     catch {file delete $filename}
     db eval {delete from files where id=$id}
+    db eval {commit transaction}
     http_header
     puts "<body onload=javascript:history.go(-2);>"
 }
@@ -1143,9 +1150,9 @@ proc filelist {} {
     html_head "File list"
     set order "lower(name)"
     set page 0
-    set pagelen 100
+    set perpage 1000
     if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page $a(page) }
-    set offset [expr {$page * $pagelen}]
+    set offset [expr {$page * $perpage}]
     if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
     if {[info exists a(sort)] && $a(sort) == "modified"} { set order "modified desc" }
     if {[info exists a(sort)] && $a(sort) == "size"} { set order "fsize(filename) desc" }
@@ -1154,11 +1161,11 @@ proc filelist {} {
          <th>Filename</th><th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
          <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
          <th><a href=\"?sort=size\" style=\"text-decoration: none;\">Size</a></th></tr>"
-    db eval "select id,name,filename,tf(created) as created,tf(modified) as modified from files order by $order" {
+    db eval {select id,name,filename,created,modified from files order by $order} {
         set filepath [filepath $filename]
         set size [expr {[file exists $filepath] ? [format_filesize [file size $filepath]] : ""}]
         puts "<tr><td>[link file:$id $name]</td><td><a href=\"files/$filename\">$filename</a></td>
-             <td>$created</td><td>$modified</td><td>$size</td></tr>"
+             <td>[format_time $created]</td><td>[format_time $modified]</td><td>$size</td></tr>"
     }
     puts "</table>"
 }
@@ -1230,6 +1237,7 @@ proc upload_post {id} {
     if {$id == "new"} {
         if {$filedata == ""} {
             location wiki:upload
+            db eval {rollback transaction}
             return
         }
         # fix up the filename: backslashes, "[1]", spaces, and trim the full path
@@ -1246,7 +1254,7 @@ proc upload_post {id} {
         #}
         # start with 0000 before filename, increment it until we get a unique name
         set num 0
-        while {[file exists [set filename [format "%s%04d%s" $base $num $tail]]]} { incr num }
+        while {[file exists [set filename [format "%s/%04d%s" $base $num $tail]]]} { incr num }
     } else {
         # if its not new and there was no file, just update the name
         if {$filedata == ""} {
@@ -1424,16 +1432,18 @@ proc parse_blocks {id blocks} {
                 append output $block
             }
             PRE {
+                #set block [text_formatting $block]
+                #set block [static_links $id $block]
                 append output "<pre>\n$block\n</pre>\n"
             }
             PREHTML {
                 #set block [text_formatting $block]
-                #set block [parse2 $id $block]
+                #set block [static_links $id $block]
                 append output $block
             }
             NONE {
                 set block [text_formatting $block]
-                set block [static_links $id $block]\n
+                set block [static_links $id $block]
                 set block [string map {\n\n\n\n "<br /><br /><br />\n" \n\n\n "<br /><br />\n" \n\n "<br />\n"} $block]
                 append output $block
             }
@@ -1589,6 +1599,9 @@ proc static_http {data} {
             return "<a href=\"$data\">$type</a>"
         }
     } else {
+        #if {[string length $data] > 60} {
+        #   return "<a href=\"$data\">[string range $data 0 25]...[string range $data end-20 end]</a>"
+        #}
         return "<a href=\"$data\">$data</a>"
     }
 }
@@ -1703,7 +1716,7 @@ proc static_call {id cmd data} {
     }
 }
 
-proc filepath {file} {
+proc filepath {{file {}}} {
     set path [join [lrange [split $::request(PATH_TRANSLATED) /] 0 end-1] /]/files
     if {$file != ""} { append path /$file }
     return $path
@@ -1753,14 +1766,14 @@ proc dynamic_variable {var} {
 
 proc filewrapper {cmd args} {
     if {$cmd == "copy" || $cmd == "delete" || $cmd == "rename"} {
-        error denied
+        return -code error "bad option"
     }
     return [eval [list file $cmd] $args]
 }
 
 proc procwrapper {i name myargs body} {
-    if {[interp eval $i info commands $name] != ""} { error denied }
-    interp invokehidden $i _proc $name $myargs $body
+    if {[interp eval $i info commands $name] != ""} { return -code error "proc already exists" }
+    interp invokehidden $i proc $name $myargs $body
 }
 
 proc db_auth {action table col db view} {
@@ -1775,7 +1788,6 @@ proc db_auth {action table col db view} {
 proc setup_interp {} {
     set i [interp create]
     interp alias $i file {} filewrapper
-    #interp alias $i proc {} procwrapper $i
     interp alias $i sql {} interp invokehidden $i db eval
     interp alias $i puts {} append output
     foreach x {myself link format_filesize get_input filter_html unescape format_time db_auth} {
@@ -1786,15 +1798,13 @@ proc setup_interp {} {
         sqlite3 db wiki.db -readonly 1
         db function tf format_time
         db eval {create temp view pages as select * from nodes where protect<=20}
-        # need this to initialize the view before the authorizer
-        db eval {select id from pages}
         db authorizer db_auth
     }
     interp eval $i [list array set request [array get ::request]]
-    foreach x {load source open exec socket rename proc cd sqlite sqlite3 db} {
+    foreach x {load source open exec socket rename proc cd sqlite sqlite3 db interp} {
         interp hide $i $x
     }
-    interp hide $i interp
+    interp alias $i proc {} procwrapper $i
     return $i
 }
 
@@ -1923,6 +1933,7 @@ proc savepage {id} {
         set level [http_auth node [expr {$input(content) == "delete" ? "delete" : "edit"}] $id]
         if {$input(editstarted) < $modified} {
             db eval {select tf(modified) as modified,modified_by from nodes where id=$id} {}
+            db eval {rollback transaction}
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
         if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $protect }
@@ -1951,6 +1962,7 @@ proc savepage {id} {
     }
 
     if {[catch { set time [time { set parsed [parse_static $id $input(content)] }] } err]} {
+        db eval {rollback transaction}
         http_error 500 $::errorInfo
     }
     set strip "$input(name) [striphtml $parsed]"
