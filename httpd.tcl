@@ -102,6 +102,7 @@ proc httpd::request {s addr req} {
     }
     if {[catch {service_request} out]} {
         if {$out != "exit"} {
+            if {[dict get $req method] == "POST"} { db eval {rollback transaction} }
             httpd::http_error $s 500 "500 Internal Server Error" "error servicing request: $out<br>$::errorInfo"
         }
     }
