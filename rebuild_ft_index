@@ -5,8 +5,8 @@ catch {file delete fts.db}
 sqlite3 wiki wiki.db
 sqlite3 fts fts.db
 
-fts eval {create virtual table search using fts3('id','name','protect','content')}
-#fts eval {create virtual table search using fts3('id','name','protect','content', tokenize porter)}
+#fts eval {create virtual table search using fts3('id','name','protect','content')}
+fts eval {create virtual table search using fts3('id','name','protect','content', tokenize porter)}
 
 proc striphtml {data} {
     regsub -all {<[^>]*?>} $data { } data
