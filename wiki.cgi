@@ -329,7 +329,7 @@ proc editprefs {} {
           <a href=http://www.tcl.tk/man/tcl8.5/TclCmd/clock.htm#M26>format help</a></td></tr>
           <tr><td style=\"border: 0px;\">Time format</td>
           <td style=\"border: 0px;\"><input type=text name=TF size=27 value=\"$::settings(TF)\"></td></tr>"
-    if {$::request(USER_AUTH)]} {
+    if {$::request(USER_AUTH)} {
         puts "<tr><td style=\"border: 0px;\">Password</td><td style=\"border: 0px;\"><input type=password name=password size=27><input type=hidden name=user value=\"$::request(USER)\"></td></tr>"
     }
     puts "</table><br><center><input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
@@ -1275,7 +1275,7 @@ proc upload_post {id} {
 
     if {$id == "new"} {
         set filename [file tail $filename]
-        db eval {insert into files (name,original_name,filename,created,modified,modified_by) values($name,$original,$filename,datetime('now'),datetime('now'),$user)}
+        db eval {insert into files (name,original_name,filename,created,created_by,modified,modified_by) values($name,$original,$filename,datetime('now'),$user,datetime('now'),$user)}
         db eval {commit transaction}
         location file:[db last_insert_rowid]
     } else {
@@ -1482,6 +1482,9 @@ proc text_formatting {data} {
 
     # =fixed=
     set data [regsub -all -linestop  {\Y=(?!\s\")([^=]*[^= ])=(?![[:graph:]])} $data {<span class=fixed>\1</span>}]
+
+    # -strikethrough-
+    set data [regsub -all -linestop {\Y-(?!\s\")(.*?[^\- ])-(?![[:graph:]])} $data {<del>\1</del>}]
 
     return $data
 }

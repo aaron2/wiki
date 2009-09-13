@@ -17,7 +17,8 @@ original_name varchar,
 filename varchar,
 modified datetime,
 modified_by varchar,
-created datetime
+created datetime,
+created_by varchar
 );
 
 CREATE TABLE tags (
@@ -35,6 +36,8 @@ content text,
 created datetime,
 created_by varchar
 );
+
+CREATE INDEX hist1 ON history (original,type);
 
 CREATE TABLE links (
 node integer,
@@ -66,3 +69,5 @@ key varchar,
 created datetime,
 expires datetime
 );
+
+CREATE INDEX cookie_key ON cookies (key);
