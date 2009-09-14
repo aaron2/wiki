@@ -770,7 +770,7 @@ proc logout {} {
 proc login {} {
     http_auth auth verify
     http_header
-    html_head "$::settings(NAME) Login"
+    html_head "Login"
     get_input input
     set user ""
 
@@ -798,11 +798,11 @@ proc login {} {
 # returns: nothing
 proc showpage {id} {
     # select some extra columns so that [dynamic_variable] can upvar them during dynamic parsing
-    db eval {select name,parsed,modified,modified_by from nodes where id=$id} {}
+    db eval {select name,parsed,modified,modified_by,created from nodes where id=$id} {}
     if {![info exists name]} { http_error 404 "no such node" }
     http_auth node view $id
     http_header
-    html_head $::settings(NAME)$name
+    html_head $name
     set page [db onecolumn {select parsed from nodes,tags where tags.name='wiki:header' and tags.node=nodes.id order by nodes.modified desc limit 1}]
     append page $parsed
     append page [db onecolumn {select parsed from nodes,tags where tags.name='wiki:footer' and tags.node=nodes.id order by nodes.modified desc limit 1}]
@@ -1288,16 +1288,16 @@ proc location {loc args} {
 }
 
 proc html_head {title args} {
-    puts "<html><head>\n<title>$title</title>"
+    puts "<html><head>\n<title>$::settings(NAME)$title</title>"
     puts [join $args]
     db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {
         #set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
         puts "<style>\n$parsed\n</style>\n"
     }
-    #foreach x [glob -nocomplain includes/*.css] {
+    #foreach x [glob -nocomplain auto_include/*.css] {
     #    puts "<link rel=stylesheet href=[myself]/$x>"
     #}
-    #foreach x [glob -nocomplain includes/*.js] {
+    #foreach x [glob -nocomplain auto_include/*.js] {
     #    puts "<script href=[myself]/$x></script>"
     #}
     puts "</head><body>"
@@ -1591,9 +1591,13 @@ proc static_http {data} {
             return "<a href=\"$data\">$type</a>"
         }
     } else {
-        #if {[string length $data] > 60} {
-        #   return "<a href=\"$data\">[string range $data 0 25]...[string range $data end-20 end]</a>"
-        #}
+        if {[string length $data] > 60} {
+           set name [lindex [split $data ?] 0]]
+           if {[string length $name] > 60} {
+               return "<a href=\"$data\">[string range $name 0 25]...[string range $name end-20 end]</a>"
+           }
+           return "<a href=\"$data\">$name</a>"
+        }
         return "<a href=\"$data\">$data</a>"
     }
 }
@@ -1732,10 +1736,12 @@ proc dynamic_variable {var} {
     switch -exact -nocase -- $var {
         MODIFIED { upvar 2 modified modified; return [format_time $modified] }
         MODIFIEDBY { upvar 2 modified_by modified_by; return $modified_by }
+        CREATED { upvar 2 modified_by modified_by; return [format_time $created] }
         ID { upvar 2 id id; return $id }
         NAME { upvar 2 name name; return [filter_html $name] }
         PATH { return [string trimright [file dirname $::request(PATH_INFO)] /]/ }
         WIKI { return [myself] }
+        WIKINAME { return $::settings(NAME) }
         TAGS {
             upvar 2 id id
             set out [list]
