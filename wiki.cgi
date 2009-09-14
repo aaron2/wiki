@@ -13,15 +13,22 @@ if {[info exists TimeProfilerMode]} {
 proc userlist {} {
     set userlevel [http_auth user view]
     http_header
-    html_head "User list"
+    html_head "User list" \
+        <script src="include/jquery-1.3.2.min.js"></script> \
+        <style>.selected \{ background: gray\; \}</style> \
+
     puts "<h1>User List</h1><br>"
     get_input a
     set order "lower(user)"
     if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
     if {[info exists a(sort)] && $a(sort) == "level"} { set order "level desc" }
 
-    puts "<form action=\"[myself]/users\" method=post><table>
-         <tr><th>Del</th>
+    puts "<form action=\"[myself]/users\" method=post>
+         <input type=hidden name=user>
+         <input type=hidden name=action>
+         <input type=hidden name=userlevel value=$userlevel>
+         <table><tbody id=list>
+         <tr><th>Edit</th>
          <th><a href=\"?sort=user\" style=\"text-decoration: none;\">User</a></th>
          <th>Host</th>
          <th>Password</th>
@@ -29,85 +36,67 @@ proc userlist {} {
          <th>Email</th>
          <th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
          <th><a href=\"?sort=level\" style=\"text-decoration: none;\">Level</a></th></tr>"
-    db eval "select * from users order by $order" {
-        if {$level <= $userlevel} {
-            puts "<tr><td align=center><input type=checkbox name=\"delete:$user\"></td>
-                 <td>$user</td>
-                 <td>$ip</td>
-                 <td><input type=password name=\"pass:$user\" size=14></td>
-                 <td><input name=\"name:$user\" value=\"$name\"></td>
-                 <td><input name=\"email:$user\" value=\"\"></td>
-                 <td>[format_time $created]</td>"
-            puts "<td><select name=\"level:$user\">"
-            foreach x {0 10 20 25 30} y {Blocked Base Edit Privileged Admin} {
-                if {$level > $userlevel} { continue }
-                puts -nonewline "<option val=$x [expr {$x == $level ? " selected" : ""}]>$y"
-            }
-            puts "</select></td></tr>"
-        } else {
-            puts "<tr><td></td>
-                 <td>$user</td>
-                 <td>$ip</td>
-                 <td></td>
-                 <td>$name</td>
-                 <td>$email</td>
-                 <td>[format_time $created]</td>
-                 <td></td></tr>"
-        }
+    db eval {select * from users order by $order} {
+        puts "<tr><td align=center></td>
+             <td>$user</td>
+             <td>$ip</td>
+             <td align=center>&#149;&#149;&#149;&#149;</td>
+             <td>$name</td>
+             <td>$email</td>
+             <td>[format_time $created]</td>
+             <td>[string map {10 Base 20 Edit 25 Privileged 30 Admin 0 Blocked} $level]</td></tr>"
     }
-    set default 10
-    # change the 1 to show multiple new user rows
-    for {set i 0} {$i < 1} {incr i} {
-        puts "<tr id=adduser$i><td></td>
-             <td><input name=user$i size=10></td>
-             <td><input name=host$i size=14></td>
-             <td><input type=password name=pass$i size=14></td>
-             <td><input name=name$i></td>
-             <td><input name=email$i></td>
-             <td></td><td><select name=level$i>"
-        foreach x {0 10 20 25 30} y {Blocked Base Edit Privileged Admin} {
-            puts -nonewline "<option val=$x [expr {$x == $default ? " selected" : ""}]>$y"
-        }
-        puts "</select></td></tr></span>"
-    }
-    puts "</table><br><input type=submit value=Save></form>"
+    puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a>
+        </form><script src=\"include/userlist.js\"></script></body></html>"
 }
 
-# handles the post of the user list page
+# handles the ajax post from the user list page
 # input: form postdata
 # returns: nothing
 proc saveusers {} {
-    http_auth user modify
     get_post input
-    foreach x [array names input pass%3A*] {
-        if {$input($x) != ""} { http_auth user password [string range $x 7 end] }
-    }
-    foreach x [array names input delete%3A*] {
-        if {$input($x) == "on"} { http_auth user delete [string range $x 9 end] }
-    }
-
     db function password {hash_pass}
-    for {set i 0} {$i < 10} {incr i} {
-        if {![info exists input(level$i)] || ![info exists input(user$i)] || ![info exists input(pass$i)] || ![info exists input(ip$i)] || ![info exists input(name$i)]} { continue }
-        if {$input(level$i) >= 10 && ($input(user$i) == "" || $input(pass$i) == "")} { continue }
-        if {$input(level$i) < 5 && $input(ip$i) == ""} { continue }
-        foreach x {user pass level ip name} { set $x $input($x$i) }
-        db eval {insert into users (user,ip,name,password,level,created) values($user,$ip,$name,password($pass),$level,datetime('now'))}
-    }
-    foreach x [array names input pass%3A*] {
-        if {$input($x) == ""} { continue }
-        set user [string range $x 7 end]
-        set pass $input($x)
-        db eval {update users set password=password($pass) where user=$user}
-    }
-    foreach x [array names input delete%3A*] {
-        if {$input($x) != "on"} { continue }
-        set user [string range $x 9 end]
-        db eval {delete from users where user=$user}
-        db eval {delete from cookies where user=$user}
+    switch -exact -- $input(action) {
+        edit {
+            http_auth user modify
+            db eval {select * from users where user=$input(user)} old {}
+            foreach x {email host level name} {
+                if {![info exists input($x)]} { http_error 400 }
+                set input($x) [string trim $input($x)]
+            }
+            set nlevel [string map {10 Base 20 Edit 25 Privileged 30 Admin 0 Blocked} $input(level)]
+
+            if {[info exists input(password)] && $input(password) != ""} {
+                db eval {update users set password=password($input(password)) where user=$input(user)}
+            }
+
+            db eval {update users set email=$input(email),ip=$input(host),level=$input(level),name=$input(name) where user=$input(user)}
+            set res "<td></td><td>$input(user)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time $old(created)]</td><td>$nlevel</td>"
+        }
+        new {
+            http_auth user create
+            foreach x {newuser email host level name} {
+                if {![info exists input($x)]} { http_error 400 }
+                set input($x) [string trim $input($x)]
+            }
+            if {$input(newuser) == "" || [db exists {select user from users where user=$input(newuser)}]} {
+                http_error 400
+            }
+            db eval {insert into users (user,ip,password,name,email,created,level) values($input(newuser),$input(host),password($input(password)),$input(name),$input(email),datetime('now'),$input(level))}
+            set res "<td></td><td>$input(newuser)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time [db onecolumn {select created from users where user=$input(newuser)}]]</td><td>$input(level)</td>"
+        }
+        delete {
+            http_auth user delete $input(user)
+            db eval {delete from users where user=$input(user)}
+            set res "\{ result : \"ok\", user : \"$input(user)\" \}"
+        }
+        default {
+            http_error 400
+        }
     }
     db eval {commit transaction}
-    location wiki:users
+    http_header
+    puts $res
 }
 
 proc editor {userlevel objectlevel action name content back} {
@@ -415,7 +404,7 @@ proc showdiff {diff} {
         if {![info exists from_data(created)]} { http_error 404 "no such node" }
     }
     if {$from_data(original) != $to_data(original)} {
-        http_error 500 "history entries are for different nodes"
+        http_error 400 "history entries are for different nodes"
     }
 
     db eval {select nodes.id as node,nodes.name as name from nodes,history where nodes.id=history.original and history.id=$to} {}
@@ -700,11 +689,10 @@ proc no_auth {} {
     exit
 }
 
-proc http_error {code text} {
+proc http_error {code {text {An error occured}}} {
     puts "Status: $code"
     puts "Content-type: text/html\n"
-    puts "<html><head><title>Error $code</title></head><body>"
-    puts $text
+    puts "<html><head><title>Error $code</title></head><body>$text</body></html>"
     close_databases
     exit
 }
@@ -1299,8 +1287,9 @@ proc location {loc args} {
     puts "Location: [myself]/$loc\n"
 }
 
-proc html_head {title} {
+proc html_head {title args} {
     puts "<html><head>\n<title>$title</title>"
+    puts [join $args]
     db eval {select content as parsed from nodes,tags where tags.name='wiki:style' and tags.node=nodes.id order by nodes.modified desc limit 1} {
         #set parsed [string map {&#123; \{ &#125; \} <br> \n\n} $parsed]
         puts "<style>\n$parsed\n</style>\n"
