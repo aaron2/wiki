@@ -13,30 +13,25 @@ if {[info exists TimeProfilerMode]} {
 proc userlist {} {
     set userlevel [http_auth user view]
     http_header
-    html_head "User list" \
-        <script src="include/jquery-1.3.2.min.js"></script> \
-        <style>.selected \{ background: gray\; \}</style> \
-
-    puts "<h1>User List</h1><br>"
     get_input a
-    set order "lower(user)"
-    if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
-    if {[info exists a(sort)] && $a(sort) == "level"} { set order "level desc" }
 
-    puts "<form action=\"[myself]/users\" method=post>
-         <input type=hidden name=user>
-         <input type=hidden name=action>
-         <input type=hidden name=userlevel value=$userlevel>
-         <table><tbody id=list>
-         <tr><th>Edit</th>
-         <th><a href=\"?sort=user\" style=\"text-decoration: none;\">User</a></th>
-         <th>Host</th>
-         <th>Password</th>
-         <th>Name</th>
-         <th>Email</th>
-         <th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
-         <th><a href=\"?sort=level\" style=\"text-decoration: none;\">Level</a></th></tr>"
-    db eval {select * from users order by $order} {
+    if {[info exists a(sort)]} { set sort $a(sort) }
+    sortable sort order {user created modified perms} {"lower(user)" "created desc" "level desc"}
+    pagination a 50 wiki:users [db onecolumn {select count(user) from users}]
+
+    html_head "User list" {
+        <script src="include/jquery-1.3.2.min.js"></script>
+        <style>.selected { background: gray; }</style>}
+
+    puts "<h1>User List</h1><br>
+        <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
+        <form action=\"[myself]/users\" method=post>
+        <input type=hidden name=user>
+        <input type=hidden name=action>
+        <input type=hidden name=userlevel value=$userlevel>
+        <table class=wikilist><tbody id=list>
+        [th $sort {Edit 0} {User 1} {Host 0} {Password 0} {Name 0} {Email 0} {Created 1} {Level 1}]"
+    db eval "select * from users order by $order limit $perpage offset $offset" {
         puts "<tr><td align=center></td>
              <td>$user</td>
              <td>$ip</td>
@@ -46,8 +41,8 @@ proc userlist {} {
              <td>[format_time $created]</td>
              <td>[string map {10 Base 20 Edit 25 Privileged 30 Admin 0 Blocked} $level]</td></tr>"
     }
-    puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a>
-        </form><script src=\"include/userlist.js\"></script></body></html>"
+    puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a></form></td></tr></table>
+        <script src=\"include/userlist.js\"></script></body></html>"
 }
 
 # handles the ajax post from the user list page
@@ -945,7 +940,7 @@ proc showhistory {nodeid} {
         puts "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
     }
 
-    puts "<table><th>Rev</th><th>Created</th><th>By</th><th>Line &#916;</th><th>Compare</th></tr>"
+    puts "<table class=wikilist>[th x {Rev 0} {Created 0} {By 0} {"Line &#916" 0} {Compare 0}]"
 
     set history [list]
     db eval {select id,type,created,created_by,content from history where original=$nodeid order by created desc} {
@@ -1073,57 +1068,104 @@ proc taglist {} {
     set level [http_auth auth verify]
     http_header
     html_head "Tag list"
-    set order "tags.name"
-    if {[info exists a(sort)] && $a(sort) == "count"} { set order "c desc" }
+    if {[info exists a(sort)]} { set sort $a(sort) }
+    sortable sort order {tag links} {"tags.name" "c desc"}
 
-    puts "<h1>Tag list</h1><br>
-         <table><tr><th><a href=\"?sort=name\" style=\"text-decoration: none;\">Tag</a></th>
-         <th><a href=\"?sort=count\" style=\"text-decoration: none;\">Links</a></th></tr><tr>"
+    puts "<h1>Tag list</h1><br><table class=wikilist>[th $sort {Tag 1} {Links 1}]"
     db eval "select tags.name as name,count(tags.node) as c from tags,nodes where nodes.protect<=$level and tags.node=nodes.id and tags.name not like 'wiki:%' group by tags.name order by $order" {
         puts "<td>[link tag:$name $name]<td align=center>$c</td></tr>"
     }
     puts "</tr></table>"
 }
 
+proc params {base vars override} {
+    uplevel {
+    set params ""
+    foreach x $vars {
+        if {[info exists $x]} {
+            append params $x=[set $x]
+        }
+    }
+    if {$params != ""} { set params ?$params }
+    return $base$params
+    }
+}
+
+proc sortable {sort_var order_var valid sql} {
+    upvar sort $sort_var
+    upvar order $order_var
+    set default 0
+    if {[info exists sort] && [set i [lsearch -exact $valid $sort]] >= 0} {
+        set default $i
+    }
+    set order [lindex $sql $default]
+    set sort [lindex $valid $default]
+}
+
+proc pagination {input per link total} {
+    set fuzzy 0.1
+    upvar perpage perpage
+    upvar a $input
+    upvar page page
+    upvar offset offset
+    upvar nav nav
+
+    set perpage $per
+    set page 0
+    if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page $a(page) }
+    if {[info exists a(perpage)] && [string is integer -strict $a(perpage)]} { set perpage $a(perpage) }
+    set lastpage [expr {int(ceil(double($total) / $perpage)) - 1}]
+    set overflow [expr {double($total % $perpage) / $total}]
+    if {$overflow < $fuzzy} { incr lastpage -1 }
+    if {$page > $lastpage} { set page $lastpage }
+    set offset [expr {$page * $perpage}]
+    if {$overflow < $fuzzy && $page == $lastpage} { set perpage $total }
+
+    set nav "<tr>
+        <td class=pagination_nav id=prev>[expr {$page > 0 ? [link $link?page=[expr {$page - 1}] "<< prev"] : ""}]</td>
+        <td class=pagination_nav id=page>[expr {$lastpage > 0 ? "[expr {$page + 1}] / [expr {$lastpage + 1}]" : ""}]</td>
+        <td class=pagination_nav id=next>[expr {$page < $lastpage ? [link $link?page=[expr {$page + 1}] "next >>"] : ""}]</td>
+        </tr>"
+}
+
+
 proc nodelist {} {
     set level [http_auth auth verify]
-    set perpage 1000
-    set page 0
     get_input a
     http_header
     html_head "Node list"
+
     array set perm { 5 R/W 10 R/O 15 "User R/O" 20 "Hidden" 25 "Priv" }
-    set order "lower(name)"
-    if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
-    if {[info exists a(sort)] && $a(sort) == "modified"} { set order "modified desc" }
-    if {[info exists a(sort)] && $a(sort) == "perms"} { set order "protect" }
-    if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page [expr {$a(page) - 1}] }
-    if {[info exists a(perpage)] && [string is integer -strict $a(perpage)]} { set perpage $a(perpage) }
-# <tr><td><< Prev</td><td></td><td></td><td></td><td></td><td align=right>Next >></td></tr><tr>
+    if {[info exists a(sort)]} { set sort $a(sort) }
+    sortable sort order {name created modified perms} {"lower(name)" "created desc" "modified desc" protect}
+    pagination a 200 wiki:nodes [db onecolumn {select count(id) from nodes}]
+
     puts "<h1>Node list</h1><br><br>
-         <table><tr><th><a href=\"?sort=name\" style=\"text-decoration: none;\">Name</a></th>
-         <th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
-         <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
-         <th><a href=\"?sort=perms\" style=\"text-decoration: none;\">Perms</a></th>
-         <th>Links</th><th>Tags</th></tr>"
-    db eval "select id,name,tf(created) as created,tf(modified) as modified,protect from nodes where protect<=$level and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset ($page * $perpage)" {
-        puts "<tr><td>[link node:$id $name]</td><td>$created</td><td>$modified</td><td align=center>$perm($protect)</td>"
+         <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
+         <table class=wikilist>[th $sort {Name 1} {Created 1} {Modified 1} {Perms 1} {Links 0} {Tags 0}]"
+    db eval "select id,name,created,modified,protect from nodes where protect<=$level and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset $offset" {
+        puts "<tr><td>[link node:$id $name]</td><td>[format_time $created]</td><td>[format_time $modified]</td><td align=center>$perm($protect)</td>"
         puts "<td align=center>[link links:$id [db eval {select count(node) from links where target=$id and type='node'}]]</td><td>"
         db eval {select name from tags where node=$id} {
             puts "[link tag:$name $name] "
         }
         puts "</td></tr>"
     }
-    puts "</table>"
+    puts "</table></td></tr>$nav</table>"
 }
 
-proc th {names} {
+proc th {sort args} {
     set out "<tr>"
-    foreach {n s} $sort {
-        if {$s} {
-            append out "<th><a href=\"?sort=[string tolower [string map {" " ""} $n]]\" style=\"text-decoration: none;\">$n</a></th>"
+    foreach {name sortable} [join $args] {
+        if {$sortable} {
+            set param [string tolower [string map {" " ""} $name]]
+            if {$param == $sort} {
+                append out "<th id=sorted>$name</th>"
+            } else {
+                append out "<th><a href=\"?sort=$param\">$name</a></th>"
+            }
         } else {
-            append out "<th>$n</th>"
+            append out "<th>$name</th>"
         }
     }
     append out "</tr>"
@@ -1136,26 +1178,21 @@ proc filelist {} {
     get_input a
     http_header
     html_head "File list"
-    set order "lower(name)"
-    set page 0
-    set perpage 1000
-    if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page $a(page) }
-    set offset [expr {$page * $perpage}]
-    if {[info exists a(sort)] && $a(sort) == "created"} { set order "created desc" }
-    if {[info exists a(sort)] && $a(sort) == "modified"} { set order "modified desc" }
-    if {[info exists a(sort)] && $a(sort) == "size"} { set order "fsize(filename) desc" }
-    puts "<h1>File list</h1><br>
-         <table><tr><th><a href=\"?sort=name\" style=\"text-decoration: none;\">Name</a></th>
-         <th>Filename</th><th><a href=\"?sort=created\" style=\"text-decoration: none;\">Created</a></th>
-         <th><a href=\"?sort=modified\" style=\"text-decoration: none;\">Modified</a></th>
-         <th><a href=\"?sort=size\" style=\"text-decoration: none;\">Size</a></th></tr>"
-    db eval {select id,name,filename,created,modified from files order by $order} {
+
+    pagination a 200 wiki:files [db onecolumn {select count(id) from files}]
+    if {[info exists a(sort)]} { set sort $a(sort) }
+    sortable sort order {name created modified size} {"lower(name)" "created desc" "modified desc" "fsize(filename) desc"}
+
+    puts "<h1>File list</h1><br>"
+    puts "<table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
+        <table class=wikilist>[th $sort {Name 1} {Filename 0} {Created 1} {Modified 1} {Size 1}]"
+    db eval "select id,name,filename,created,modified from files order by $order limit $perpage offset $offset" {
         set filepath [filepath $filename]
         set size [expr {[file exists $filepath] ? [format_filesize [file size $filepath]] : ""}]
         puts "<tr><td>[link file:$id $name]</td><td><a href=\"files/$filename\">$filename</a></td>
              <td>[format_time $created]</td><td>[format_time $modified]</td><td>$size</td></tr>"
     }
-    puts "</table>"
+    puts "</table></td></tr>$nav</table>"
 }
 
 proc file_size {file} {
