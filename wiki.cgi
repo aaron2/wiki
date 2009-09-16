@@ -125,7 +125,7 @@ proc editor {userlevel objectlevel action name content back} {
             # if user is logged in, only show them allowed permissions. if user is anon they will be prompted
             # to log in if selected permissions are above anon priviledge
             if {$::request(USER_AUTH) && $val > $userlevel} { continue }
-            puts -nonewline "<option value=$val [expr {$val == $objectlevel ? " selected" : ""}]>$name"
+            puts -nonewline "<option value=$val [expr {$val == $objectlevel ? " selected" : ""}]>$name</option>"
         }
         puts "</select>"
     }
@@ -933,6 +933,8 @@ proc showhistory {nodeid} {
     }
     http_header
     html_head "History for node $nodeid"
+    #get_input a
+    #pagination a 200 history:$nodeid [db onecolumn {select count(id) from history where original=$nodeid}]
     puts "<h1>Revision history for node $nodeid</h1><br>"
     if {![info exists name]} {
         puts "Node is deleted<br><br>"
@@ -1078,22 +1080,22 @@ proc taglist {} {
     puts "</tr></table>"
 }
 
-proc params {base vars override} {
-    uplevel {
-    set params ""
-    foreach x $vars {
-        if {[info exists $x]} {
-            append params $x=[set $x]
-        }
+proc params {base input_var args} {
+    upvar $input_var input
+    array set params [array get input]
+    foreach {name val} $args { set params($name) $val }
+    set tmp [list]
+    foreach {name val} [array get params] {
+        if {$val == ""} { continue }
+        lappend tmp $name=$val
     }
-    if {$params != ""} { set params ?$params }
-    return $base$params
-    }
+    if {[llength $tmp] > 0} { append base ?[join $tmp &] }
+    return $base
 }
 
 proc sortable {sort_var order_var valid sql} {
-    upvar sort $sort_var
-    upvar order $order_var
+    upvar $sort_var sort
+    upvar $order_var order
     set default 0
     if {[info exists sort] && [set i [lsearch -exact $valid $sort]] >= 0} {
         set default $i
@@ -1105,9 +1107,10 @@ proc sortable {sort_var order_var valid sql} {
 proc pagination {input per link total} {
     set fuzzy 0.1
     upvar perpage perpage
-    upvar a $input
+    upvar $input a
     upvar page page
     upvar offset offset
+    upvar lastpage lastpage
     upvar nav nav
 
     set perpage $per
@@ -1121,13 +1124,16 @@ proc pagination {input per link total} {
     set offset [expr {$page * $perpage}]
     if {$overflow < $fuzzy && $page == $lastpage} { set perpage $total }
 
-    set nav "<tr>
-        <td class=pagination_nav id=prev>[expr {$page > 0 ? [link $link?page=[expr {$page - 1}] "<< prev"] : ""}]</td>
-        <td class=pagination_nav id=page>[expr {$lastpage > 0 ? "[expr {$page + 1}] / [expr {$lastpage + 1}]" : ""}]</td>
-        <td class=pagination_nav id=next>[expr {$page < $lastpage ? [link $link?page=[expr {$page + 1}] "next >>"] : ""}]</td>
-        </tr>"
+    if {$lastpage > 0} {
+        set nav "<tr>
+            <td class=pagination_nav id=prev>[expr {$page > 0 ? [link [params $link a page [expr {$page - 1}]] "<< prev"] : ""}]</td>
+            <td class=pagination_nav id=page>[expr {$page + 1}] / [expr {$lastpage + 1}]</td>
+            <td class=pagination_nav id=next>[expr {$page < $lastpage ? [link [params $link a page [expr {$page + 1}]] "next >>"] : ""}]</td>
+            </tr>"
+    } else {
+        set nav ""
+    }
 }
-
 
 proc nodelist {} {
     set level [http_auth auth verify]
