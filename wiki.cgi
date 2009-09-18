@@ -423,7 +423,7 @@ proc showdiff {diff} {
 
     set to_data(content) [filter_html [get_history_content $to]]
     set from_data(content) [filter_html $from_data(content)]
-    puts "<pre>[format_diff [diff $from_data(content) $to_data(content)] $to_data(content)]</pre>"
+    puts "<pre>[format_diff [diff [split $from_data(content) \n] [split $to_data(content) \n]] $to_data(content)]</pre>"
     puts "<br><hr>"
 }
 
@@ -495,20 +495,26 @@ proc longestCommonSubsequence { sequence1 sequence2 } {
 # outputs the changed lines with the styles applied
 proc format_diff {diff orig} {
     set orig [split $orig \n]
+    set new $orig
     set removed [lindex $diff 0]
+    set added [lindex $diff 1]
     set aspan "<span style=\"background: #88ee88;\">"
     set rspan "<span style=\"background: #ee8888;\">"
+
     foreach x $removed {
-        set orig [lreplace $orig $x $x "$rspan[lindex $orig $x]</span>"]
+        set new [lreplace $new $x $x "$rspan[lindex $new $x]</span>"]
     }
-    foreach {idx text} [lindex $diff 1] {
+
+    set add_count 0
+    foreach {idx text} $added {
         foreach x $removed {
-            if {$x > $idx} { break }
+            if {$x+$add_count > $idx} { break }
             incr idx
         }
-        set orig [linsert $orig $idx "$aspan$text</span>"]
+        incr add_count
+        set new [linsert $new $idx "$aspan$text</span>"]
     }
-    return [join $orig \n]
+    return [join $new \n]
 }
 
 proc create_history_entry {id} {
@@ -546,8 +552,6 @@ proc get_history_content {id} {
 }
 
 proc diff {lines1 lines2} {
-    set lines1 [split $lines1 \n]
-    set lines2 [split $lines2 \n]
     set added [list]
     set removed [list]
     set i 0
@@ -563,6 +567,14 @@ proc diff {lines1 lines2} {
                 incr j
             }
             incr i
+            incr j
+        }
+        while { $i < [llength $lines1] } {
+            lappend added $i [lindex $lines1 $i]
+            incr i
+        }
+        while { $j < [llength $lines2] } {
+            lappend removed $j
             incr j
         }
     }
