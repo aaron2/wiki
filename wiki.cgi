@@ -381,50 +381,43 @@ proc saveprefs {} {
 }
 
 # show the difference between 2 revisions
-# input: <from id>:<to id>, the : is literal. the ids are the primary key in the history table, not a node id
-# <from> may be "curr" for the current node contents, which is found by looking up the original node for the <to> id
+# <from> may be "curr" for the current node contents
 # returns: nothing
-proc showdiff {diff} {
-    set from [lindex [split $diff :] 0]
-    set to [lindex [split $diff :] 1]
+proc showdiff {node from to} {
+    if {![db exists {select id from history where original=$node limit 1}]} { http_error 404 "no such node" }
+    db eval {select name from nodes where id=$node} {}
 
-    db eval {select original,tf(created) as created,created_by from history where id=$to} to_data {}
-    if {![info exists to_data(created)]} { http_error 404 "no such node" }
+    if {[string match c* [string tolower $from]]} {
+        if {[info exists name]} { 
+            set from $name
+        } else {
+            set from [db onecolumn {select count(id)-1 from history where original=$node order by created limit 1}]
+        }
+    }
 
-    if {$from != "curr"} {
-        db eval {select original,tf(created) as created,created_by from history where id=$from} from_data {}
-        if {![info exists from_data(created)]} { http_error 404 "no such node" }
+    if {[info exists name] && $from == $name} {
+        db eval {select content,modified as created,modified_by as created_by from nodes where id=$node} from_data {}
+        set rev [db onecolumn {select count(id) from history where original=$node}]
+        set link "[link node:$node "Revision $rev"] (current) modified by $from_data(created_by) on [format_time $from_data(created)]<br>"
     } else {
-        db eval {select id as original,content,tf(modified) as created,modified_by as created_by from nodes where id=$to_data(original)} from_data {}
-        if {![info exists from_data(created)]} { http_error 404 "no such node" }
+        db eval {select id,created as created,created_by from history where original=$node order by created limit 1 offset $from} from_data {}
+        if {![info exists from_data(created)]} { http_error 404 "no such rev $from" }
+        set from_data(content) [get_history_content $from_data(id)]
+        set link "[link history:$node:$from "Revision $from"] modified by $from_data(created_by) on [format_time $from_data(created)]<br>"
     }
-    if {$from_data(original) != $to_data(original)} {
-        http_error 400 "history entries are for different nodes"
-    }
+    db eval {select id,created,created_by from history where original=$node order by created limit 1 offset $to} to_data {}
+    if {![info exists to_data(created)]} { http_error 404 "no such rev $to" }
 
-    db eval {select nodes.id as node,nodes.name as name from nodes,history where nodes.id=history.original and history.id=$to} {}
-    if {![info exists node]} {
-        set node deleted
-        set name "deleted node $to_data(original)"
-    }
+    if {![info exists name]} { set name "deleted node $node" }
 
-    http_auth node view $node
     http_header
     html_head "Diffing $name"
-    set revs [db eval {select id from history where original=$to_data(original)}]
-
-    if {$from == "curr"} {
-        puts "[link node:$node "Revision [expr {[llength $revs] + 1}]"] (current)<br>"
-    } else {
-        puts "[link viewhistory:$from "Revision [expr {[lsearch $revs $from] + 1}]"] modified by $from_data(created_by) on $from_data(created)<br>"
-        set from_data(content) [get_history_content $from]
-    }
-    puts "[link viewhistory:$to "Revision [expr {[lsearch $revs $to] + 1}]"] modified by $to_data(created_by) on $to_data(created)<br>\n<hr>"
-
-    set to_data(content) [filter_html [get_history_content $to]]
+    set to_data(content) [filter_html [get_history_content $to_data(id)]]
     set from_data(content) [filter_html $from_data(content)]
-    puts "<pre>[format_diff [diff [split $from_data(content) \n] [split $to_data(content) \n]] $to_data(content)]</pre>"
-    puts "<br><hr>"
+    puts "[link history:$node:$to "Revision $to"] modified by $to_data(created_by) on [format_time $to_data(created)]<br>
+        $link\n<hr>
+        <pre>[format_diff [diff [split $from_data(content) \n] [split $to_data(content) \n]] $to_data(content)]</pre>
+        <br><hr>"
 }
 
 # used only by [longestCommonSubsequence]
@@ -518,19 +511,18 @@ proc format_diff {diff orig} {
 }
 
 proc create_history_entry {id} {
-    db eval {select content as new,modified,modified_by from nodes where id=$id} {}
+    db eval {select content,rev,modified,modified_by from nodes where id=$id} {}
     set type full
-    set content $new
-    #db eval {select content as lastfull from history where original=$id and type='full' order by id desc limit 1} {}
+    #db eval {select content as lastfull from history where original=$id and type='full' and id<$id order by id desc limit 1} {}
     #if {[info exists lastfull]} {
     #    set diff [diff $new $lastfull]
-    #    if {[llength $diff] <= 45} {
+    #    if {[llength [join $diff]] <= 45} {
     #        set type diff
     #        set content $diff
     #    }
-    #    #elseif {[db eval {select count(type) from (select type from history where original=$id order by created desc limit 7) where type='full'}] == 0}
+    #    #elseif {[db eval {select count(type) from (select type from history where node=$id order by created desc limit 7) where type='full'}] == 0}
     #}
-    db eval {insert into history (original,type,content,created,created_by) values($id,$type,$content,$modified,$modified_by)}
+    db eval {insert into history (node,rev,type,content,created,created_by) values($id,$rev,$type,$content,$modified,$modified_by)}
 }
 
 proc get_history_content {id} {
@@ -539,7 +531,7 @@ proc get_history_content {id} {
     if {$type == "full"} {
         return $content
     }
-    db eval {select content as lastfull from history where original=(select original from history where id=$id) and type='full' and id<=$id order by id desc limit 1} {}
+    db eval {select content as lastfull from history where node=$node and type='full' and rev<$rev order by rev desc limit 1} {}
 
     set lastfull [split $lastfull \n]
     foreach x [lreverse [lindex $content 0]] {
@@ -939,72 +931,100 @@ proc link {to text} {
 
 proc showhistory {nodeid} {
     http_auth node view $nodeid
+    if {[string match *:* $nodeid]} {
+        set nodeid [split $nodeid :]
+        if {[llength $nodeid] == 2} {
+            eval viewhistory $nodeid
+        } elseif {[llength $nodeid] == 3} {
+            eval showdiff $nodeid
+        } else {
+            http_error 500 "invalid arguments"
+        }
+        return
+    }
+
     db eval {select name,tf(modified) as modified,modified_by,content as currcontent from nodes where id=$nodeid} {}
-    if {![info exists name] && ![db exists {select id from history where original=$nodeid limit 1}]} {
+    if {![info exists name] && ![db exists {select original from history where original=$nodeid limit 1}]} {
         http_error 404 "no such node"
     }
+    set currev [db onecolumn {select count(id) from history where original=$nodeid}]
+    get_input a
     http_header
     html_head "History for node $nodeid"
-    #get_input a
-    #pagination a 200 history:$nodeid [db onecolumn {select count(id) from history where original=$nodeid}]
     puts "<h1>Revision history for node $nodeid</h1><br>"
+    if {$currev == 0} {
+        puts "no changes have been made to this node: [link node:$nodeid $name]"
+        return
+    }
+
+    pagination a 200 history:$nodeid $currev
+    set history [list]
+    set rev [expr {$currev - $offset}]
+    db eval {select type,created,created_by,content from history where original=$nodeid order by created desc limit $perpage+1 offset $offset} {
+        incr rev -1
+        set lines [expr {[llength [regexp -all -inline {[^\n]\n} $content]] + 1}]
+        lappend history [list $rev [format_time $created] $created_by $lines]
+    }
+
     if {![info exists name]} {
         puts "Node is deleted<br><br>"
     } else {
         puts "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
     }
-
+    puts "<table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>"
     puts "<table class=wikilist>[th x {Rev 0} {Created 0} {By 0} {"Line &#916" 0} {Compare 0}]"
 
-    set history [list]
-    db eval {select id,type,created,created_by,content from history where original=$nodeid order by created desc} {
-        lappend history [list $id $type [format_time $created] $created_by $content]
+    if {$page == 0} {
+        if {![info exists name]} {
+            puts "<tr><td align=center>-</td><td>[lindex $history 0 1]</td><td>[lindex $history 0 2]</td>
+                <td align=center>[expr {-1 * [lindex $history 1 3]}]</td>
+                <td align=right>[link history:$nodeid:[lindex $history 0 0]:[lindex $history 1 0] prev]</td></tr>"
+            set history [lrange $history 1 end]
+        } else {
+            set lines [expr {[llength [regexp -all -inline {[^\n]\n} $currcontent]] + 1}]
+            puts "<tr><td align=center>[link node:$nodeid $currev]</td><td>$modified</td><td>$modified_by</td>
+                <td align=center>[expr {$lines - [lindex $history 0 3]}]</td>
+                <td align=right>[link history:$nodeid:C:[lindex $history 0 0] prev]</td></tr>"
+        }
     }
-    set i [llength $history]
 
-    if {![info exists name]} {
-        set nextid [lindex $history 0 0]
-        set nextlines 0
-        puts "<tr><td align=center>-</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
-    } else {
-        set nextid [lindex $history 0 0]
-        set nextlines [expr {[llength [regexp -all -inline {[^\n]\n} [lindex $history 0 4]]] + 1}]
-        set lines [expr {[llength [regexp -all -inline {[^\n]\n} $currcontent]] + 1}]
-        puts "<tr><td align=center>[link node:$nodeid [expr {$i+1}]]</td><td>$modified</td><td>$modified_by</td>"
-        puts "<td align=center>[expr {$lines - $nextlines}]</td><td align=right>[link diff:curr:[lindex $history 0 0] prev]</td></tr>"
-        puts "<tr><td align=center>[link viewhistory:[lindex $history 0 0] $i]</td><td>[lindex $history 0 2]</td><td>[lindex $history 0 3]</td>"
+    set next 0
+    foreach x [lrange $history 0 end-1] {
+        incr next
+        foreach {rev created created_by lines} $x break
+        puts "<tr><td align=center>[link history:$nodeid:$rev $rev]</td><td>$created</td><td>$created_by</td>
+            <td align=center>[expr {$lines - [lindex $history $next 3]}]</td>
+            <td>[link history:$nodeid:C:$rev current] [link history:$nodeid:$rev:[lindex $history $next 0] prev]</td></tr>"
     }
-    incr i -1
 
-    foreach x [lrange $history 1 end] {
-        set id [lindex $x 0]
-        set lines [expr {[llength [regexp -all -inline {[^\n]\n} [lindex $x 4]]] + 1}]
-        puts "<td align=center>[expr {$nextlines - $lines}]</td><td>[link diff:curr:$nextid current] [link diff:$id:$nextid prev]</td></tr>"
-
-        puts "<tr><td align=center>[link viewhistory:$id $i]</td><td>[lindex $x 2]</td><td>[lindex $x 3]</td>"
-        set nextlines $lines
-        set nextid $id
-        incr i -1
+    if {$page == $lastpage} {
+        puts "<tr><td align=center>[link history:$nodeid:[lindex $history end 0] [lindex $history end 0]]</td><td>[lindex $history end 1]</td>
+            <td>[lindex $history end 2]</td><td align=center><b>[lindex $history end 3]</b></td>
+            <td>[link history:$nodeid:C:[lindex $history end 0] current]</td></tr>"
     }
-    puts "<td align=center><b>$lines</b></td><td>[link diff:curr:$id current]</td></tr></table>"
+    puts "</table></td></tr>$nav</table></body></html>"
 }
 
-proc viewhistory {id} {
-    db eval {select original,tf(created) as created,created as oc from history where id=$id} {}
-    if {![info exists original]} { http_error 404 "no such node" }
-    http_auth node view $original
+proc viewhistory {node rev} {
+    db eval {select id,created from history where original=$node order by created limit 1 offset $rev} {}
+    if {![info exists created]} { http_error 404 "no such rev" }
     http_header
-    html_head "History for node $original"
-    db eval {select created as nexttime,id as nextid from history where original=$original and created>$oc order by created limit 1} {}
-    set next [expr {![info exists nextid] ? "current" : [link viewhistory:$nextid [format_time $nexttime]]}]
+    html_head "History for node $node"
+    set revs [list [expr {$rev - 1}] $rev [expr {$rev + 1}]]
 
-    db eval {select name from nodes where id=$original} {}
+    db eval {select name from nodes where id=$node} {}
     if {![info exists name]} {
-        puts "Contents of deleted node $original created $created<br><hr>"
+        puts "Contents of deleted node $node created [format_time $created]"
     } else {
-        #puts "Contents of [link node:$original $name] - created $created until $next<br><hr>"
-        puts "Contents of &quot;[link node:$original $name]&quot; created $created<br><hr>"
+        puts "Contents of &quot;[link node:$node $name]&quot; created [format_time $created]"
     }
+    puts "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[link history:$node:[lindex $revs 0] <] [link history:$node "(rev [lindex $revs 1])"] [link history:$node:[lindex $revs 2] >]"
+    puts "<br><hr>"
+    # its a good idea but parsing has side effects
+    #get_input a
+    #if {[info exists a(formatting)]} {
+    #    puts "[parse_dynamic $node [parse_static $node [get_history_content $id]]]"
+    #}
     set content [string map {& &amp;} [get_history_content $id]]
     puts "<pre>[filter_html $content]</pre><hr>"
 }
@@ -1127,6 +1147,7 @@ proc pagination {input per link total} {
 
     set perpage $per
     set page 0
+    if {$total <= 0} { set total 1 }
     if {[info exists a(page)] && [string is integer -strict $a(page)]} { set page $a(page) }
     if {[info exists a(perpage)] && [string is integer -strict $a(perpage)]} { set perpage $a(perpage) }
     set lastpage [expr {int(ceil(double($total) / $perpage)) - 1}]
@@ -2088,6 +2109,7 @@ proc open_databases {} {
     sqlite3 fts [file join $dir fts.db]
     fts eval {PRAGMA synchronous = OFF}
     db function tf {format_time}
+    db timeout 3000
 }
 
 proc close_databases {} {
@@ -2121,8 +2143,6 @@ proc service_request {} {
             tag  { showtag $arg }
             links { showlinks $arg }
             history { showhistory $arg }
-            viewhistory { viewhistory $arg }
-            diff { showdiff $arg }
             wiki {
                 switch -exact -- $arg {
                     nodes { nodelist }
