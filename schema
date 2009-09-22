@@ -31,13 +31,14 @@ foreign key (node) references nodes (id)
 CREATE TABLE history (
 id integer primary key autoincrement,
 original integer not null,
-type varchar,
+type varchar not null,
 content text,
 created datetime,
-created_by varchar
+created_by varchar,
+foreign key (original) references nodes (id)
 );
 
-CREATE INDEX hist1 ON history (original,type);
+CREATE INDEX hist1 ON history (original,created);
 
 CREATE TABLE links (
 node integer,
