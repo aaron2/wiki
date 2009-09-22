@@ -511,7 +511,7 @@ proc format_diff {diff orig} {
 }
 
 proc create_history_entry {id} {
-    db eval {select content,rev,modified,modified_by from nodes where id=$id} {}
+    db eval {select content,modified,modified_by from nodes where id=$id} {}
     set type full
     #db eval {select content as lastfull from history where original=$id and type='full' and id<$id order by id desc limit 1} {}
     #if {[info exists lastfull]} {
@@ -520,18 +520,18 @@ proc create_history_entry {id} {
     #        set type diff
     #        set content $diff
     #    }
-    #    #elseif {[db eval {select count(type) from (select type from history where node=$id order by created desc limit 7) where type='full'}] == 0}
+    #    #elseif {[db eval {select count(type) from (select type from history where original=$id order by created desc limit 7) where type='full'}] == 0}
     #}
-    db eval {insert into history (node,rev,type,content,created,created_by) values($id,$rev,$type,$content,$modified,$modified_by)}
+    db eval {insert into history (original,type,content,created,created_by) values($id,$type,$content,$modified,$modified_by)}
 }
 
 proc get_history_content {id} {
     #set diffs [db eval {select content from (select id,type,content from history where original=(select original from history where id=$id)) where id<=$id and id>=(select id from history where original=(select original from history where id=$id) and type='full' and id <=$id order by id desc limit 1)}]
-    db eval {select content,type from history where id=$id} {}
+    db eval {select original,content,type from history where id=$id} {}
     if {$type == "full"} {
         return $content
     }
-    db eval {select content as lastfull from history where node=$node and type='full' and rev<$rev order by rev desc limit 1} {}
+    db eval {select content as lastfull from history where original=$original and type='full' and id<$id order by id desc limit 1} {}
 
     set lastfull [split $lastfull \n]
     foreach x [lreverse [lindex $content 0]] {
