@@ -96,25 +96,26 @@ proc saveusers {} {
 
 proc editor {userlevel objectlevel action name content back} {
     puts "<form name=form action=\"$action\" method=post>
-          <input name=name value=\"$name\" style=\"width: 100%;\"><br><br>
+          <input name=name value=\"$name\" style=\"width: 100%; margin-bottom: .5em;\"><br>
           <textarea name=content id=content rows=30 style=\"width: 100%; margin-bottom: .7em;\">$content</textarea><br>
-          <input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
+          <div id=captcha></div>
+          <div><input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel onclick=\"javascript:$back;\" style=\"margin-left: 2em;\">
           <input type=hidden name=editstarted value=[clock seconds]>
           <a style=\"position: absolute; right: 50%;\" href=[myself]/tag:wiki:help>Help</a>
           <script src=\"include/editor.js\"></script>"
 
-    if {$objectlevel != ""} {
+    if {$objectlevel != "" && $::request(USER_AUTH)} {
         puts "<select name=protect style=\"position: absolute; right: 1em;\">"
         foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
-            # if user is logged in, only show them allowed permissions. if user is anon they will be prompted
-            # to log in if selected permissions are above anon priviledge
-            if {$::request(USER_AUTH) && $val > $userlevel} { continue }
+            if {$val > $userlevel} { continue }
             puts -nonewline "<option value=$val [expr {$val == $objectlevel ? " selected" : ""}]>$name</option>"
         }
         puts "</select>"
+    } elseif {!$::request(USER_AUTH)} {
+        puts "<a href=\"[myself]/wiki:login\" style=\"position: absolute; right: 1em;\">login</a>"
     }
-    puts "</form>"
+    puts "</div></form>"
 }
 
 # show the node editing page
@@ -143,6 +144,10 @@ proc editnode {id args} {
         set back "document.location='[myself]/node:$id'"
     }
     editor $level $protect $action $name $content $back
+    if {!$::request(USER_AUTH) && $::settings(RECAPTCHA_PRIVATE_KEY) != ""} {
+        puts "<script src=\"http://api.recaptcha.net/js/recaptcha_ajax.js\"></script>
+            <script>Recaptcha.create('$::settings(RECAPTCHA_PUBLIC_KEY)', 'captcha', { theme: 'clean' });</script>"
+    }
     puts "</body></html>"
 }
 
@@ -177,8 +182,10 @@ proc editconfig {} {
     foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
         puts -nonewline "<option value=$val [expr {$val == $tmpset(PROTECT) ? " selected" : ""}]>$name"
     }
-    puts "</select></td></tr>"
-    puts "<tr><td style=\"border: 0px solid black;\">Login expires</td><td style=\"border: 0px solid black;\"><input type=text name=EXPIRES size=27 value=\"$tmpset(EXPIRES)\"></td></tr>"
+    puts "</select></td></tr>
+        <tr><td style=\"border: 0px solid black;\">Login expires</td><td style=\"border: 0px solid black;\"><input type=text name=EXPIRES size=27 value=\"$tmpset(EXPIRES)\"></td></tr>
+        <tr><td style=\"border: 0px solid black;\">Recaptcha privkey</td><td style=\"border: 0px solid black;\"><input type=text name=RECAPTCHA_PRIVATE_KEY size=27 value=\"$tmpset(RECAPTCHA_PRIVATE_KEY)\"></td></tr>
+        <tr><td style=\"border: 0px solid black;\">Recaptcha pubkey</td><td style=\"border: 0px solid black;\"><input type=text name=RECAPTCHA_PUBLIC_KEY size=27 value=\"$tmpset(RECAPTCHA_PUBLIC_KEY)\"></td></tr>
 
     puts "
 <tr><td style=\"border: 0px solid black;\"></td><td align=center style=\"border: 0px solid black;\">
@@ -228,7 +235,7 @@ proc saveconfig {} {
     # checkboxes dont submit any data when not checked, so keep a list of them
     set checkboxes {FILTER_HTML ANON_CREATE}
     # dont trust the form just look for known valid options. this list must be kept in sync with editconfig and the db
-    foreach x {NAME TZ TF FILTER_HTML HTML_WHITELIST ANON_CREATE EXPIRES} {
+    foreach x {NAME TZ TF FILTER_HTML HTML_WHITELIST ANON_CREATE EXPIRES RECAPTCHA_PRIVATE_KEY RECAPTCHA_PUBLIC_KEY} {
         if {[info exists input($x)]} {
             if {$x == "TZ" && [catch {clock format [clock seconds] -timezone $input($x)} err]} {
                 lappend status "Invalid timezone"
@@ -645,6 +652,7 @@ proc reqlevel {entity action {target {}}} {
             }
         }
         auth:verify {
+            upvar level level
             if {$level >= 5 && $level < 20} { incr level 5 }
             set reqlevel 5
         }
@@ -2035,6 +2043,20 @@ proc format_time {t} {
     return [clock format $t -format $::settings(TF) -timezone :$::settings(TZ)]
 }
 
+proc verify_captcha {var} {
+    if {$::settings(RECAPTCHA_PRIVATE_KEY) == ""} { return 1 }
+    upvar $var input
+    if {![info exists input(recaptcha_challenge_field)] || ![info exists input(recaptcha_response_field)]} { return 0 }
+
+    package require http
+    set query [http::formatQuery privatekey $::settings(RECAPTCHA_PRIVATE_KEY) remoteip $::request(REMOTE_ADDR) challenge $input(recaptcha_challenge_field) response $input(recaptcha_response_field)]
+    set t [http::geturl http://api-verify.recaptcha.net/verify -query $query]
+    if {[http::ncode $t] != 200} { return 0 }
+    set data [split [http::data $t] \n]
+    if {[lindex $data 0] != "true"} { return 0 }
+    return 1
+}
+
 # save a node after editing
 # input: a node id or "new", and form postdata
 # returns: nothing
@@ -2049,6 +2071,7 @@ proc savepage {id} {
             db eval {rollback transaction}
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
+        if {!$::request(USER_AUTH) && ![verify_captcha input]} { http_error 403 }
         if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $protect }
         if {$input(content) == $content} {
             db eval {update nodes set name=$input(name),protect=$input(protect) where id=$id}
@@ -2073,6 +2096,7 @@ proc savepage {id} {
         set new 0
     } else {
         set level [http_auth node create]
+        if {!$::request(USER_AUTH) && ![verify_captcha input]} { http_error 403 }
         if {![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $level }
         db eval {insert into nodes (name,content,protect) values($input(name),$input(content),$input(protect)}
         set id [db last_insert_rowid]

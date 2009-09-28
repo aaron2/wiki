@@ -16,6 +16,8 @@ set settings {
     ANON_CREATE 1
     PROTECT 5
     EXPIRES "7 days"
+    RECAPTCHA_PRIVATE_KEY ""
+    RECAPTCHA_PUBLIC_KEY ""
 }
 
 foreach {key val} $settings {
