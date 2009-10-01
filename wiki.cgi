@@ -11,7 +11,7 @@ if {[info exists TimeProfilerMode]} {
 # input: none
 # returns: nothing
 proc userlist {} {
-    set userlevel [http_auth user view]
+    if {![authorized user view]} { no_auth }
     http_header
     get_input a
 
@@ -28,7 +28,7 @@ proc userlist {} {
         <form action=\"[myself]/users\" method=post>
         <input type=hidden name=user>
         <input type=hidden name=action>
-        <input type=hidden name=userlevel value=$userlevel>
+        <input type=hidden name=userlevel value=$::request(USER_LEVEL)>
         <table class=wikilist><tbody id=list>
         [th $sort {Edit 0} {User 1} {Host 0} {Password 0} {Name 0} {Email 0} {Created 1} {Level 1}]"
     db eval "select * from users order by $order limit $perpage offset $offset" {
@@ -39,7 +39,7 @@ proc userlist {} {
              <td>$name</td>
              <td>$email</td>
              <td>[format_time $created]</td>
-             <td>[string map {10 Base 20 Edit 25 Privileged 30 Admin 0 Blocked} $level]</td></tr>"
+             <td>[string map {10 Read-only 20 Normal 25 Privileged 30 Admin 0 Blocked} $::request(USER_LEVEL)]</td></tr>"
     }
     puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a></form></td></tr></table>
         <script src=\"include/userlist.js\"></script></body></html>"
@@ -53,13 +53,13 @@ proc saveusers {} {
     db function password {hash_pass}
     switch -exact -- $input(action) {
         edit {
-            http_auth user modify
+            if {![authorized user modify]} { no_auth }
             db eval {select * from users where user=$input(user)} old {}
             foreach x {email host level name} {
                 if {![info exists input($x)]} { http_error 400 }
                 set input($x) [string trim $input($x)]
             }
-            set nlevel [string map {10 Base 20 Edit 25 Privileged 30 Admin 0 Blocked} $input(level)]
+            set nlevel [string map {10 Read-only 20 Normal 25 Privileged 30 Admin 0 Blocked} $input(level)]
 
             if {[info exists input(password)] && $input(password) != ""} {
                 db eval {update users set password=password($input(password)) where user=$input(user)}
@@ -69,7 +69,7 @@ proc saveusers {} {
             set res "<td></td><td>$input(user)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time $old(created)]</td><td>$nlevel</td>"
         }
         new {
-            http_auth user create
+            if {![authorized user create]} { no_auth }
             foreach x {newuser email host level name} {
                 if {![info exists input($x)]} { http_error 400 }
                 set input($x) [string trim $input($x)]
@@ -81,7 +81,7 @@ proc saveusers {} {
             set res "<td></td><td>$input(newuser)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time [db onecolumn {select created from users where user=$input(newuser)}]]</td><td>$input(level)</td>"
         }
         delete {
-            http_auth user delete $input(user)
+            if {![authorized user delete $input(user)]} { no_auth }
             db eval {delete from users where user=$input(user)}
             set res "\{ result : \"ok\", user : \"$input(user)\" \}"
         }
@@ -107,7 +107,7 @@ proc editor {userlevel objectlevel action name content back} {
 
     if {$objectlevel != "" && $::request(USER_AUTH)} {
         puts "<select name=protect style=\"position: absolute; right: 1em;\">"
-        foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
+        foreach val {5 10 15 20 25} name [list "All Read/Write" "Anon Read-only" "Users Only" "User Read-only" Privileged] {
             if {$val > $userlevel} { continue }
             puts -nonewline "<option value=$val [expr {$val == $objectlevel ? " selected" : ""}]>$name</option>"
         }
@@ -123,7 +123,7 @@ proc editor {userlevel objectlevel action name content back} {
 # returns: nothing
 proc editnode {id args} {
     if {$id == "new"} {
-        set level [http_auth node create]
+        if {![authorized node create]} { no_auth }
         http_header
         html_head "Creating new page"
         puts "<h1>Creating new page</h1><br>"
@@ -135,7 +135,7 @@ proc editnode {id args} {
     } else {
         db eval {select name,content,protect from nodes where id=$id} {}
         if {![info exists name]} { http_error 404 "no such node" }
-        set level [http_auth node edit $id]
+        if {![authorized node edit $id]} { no_auth }
         http_header
         html_head "Editing $name"
         set action [myself]/edit:$id
@@ -143,7 +143,7 @@ proc editnode {id args} {
         regsub "^\n" $content "\\&nbsp;\n" content
         set back "document.location='[myself]/node:$id'"
     }
-    editor $level $protect $action $name $content $back
+    editor $::request(USER_LEVEL) $protect $action $name $content $back
     if {!$::request(USER_AUTH) && $::settings(RECAPTCHA_PRIVATE_KEY) != ""} {
         puts "<script src=\"http://api.recaptcha.net/js/recaptcha_ajax.js\"></script>
             <script>Recaptcha.create('$::settings(RECAPTCHA_PUBLIC_KEY)', 'captcha', { theme: 'clean' });</script>"
@@ -155,7 +155,7 @@ proc editnode {id args} {
 # input: none
 # returns: nothing
 proc editconfig {} {
-    http_auth wiki config
+    if {![authorized wiki config]} { no_auth }
     get_input input
     http_header
     html_head "Wiki configuration"
@@ -179,13 +179,13 @@ proc editconfig {} {
           <tr><td style=\"border: 0px solid black;\">Allow anon create</td>
           <td style=\"border: 0px solid black;\"><input type=checkbox name=ANON_CREATE [expr {$tmpset(ANON_CREATE) ? "checked" : ""}]></td></tr>
           <tr><td style=\"border: 0px solid black;\">Default permissions</td><td style=\"border: 0px solid black;\"><select name=PROTECT>"
-    foreach val {5 10 15 20 25} name [list "Read/Write" "Anon Read-only" "User Read-Only" Private Privileged] {
+    foreach val {5 10 15 20 25} name [list "All Read/Write" "Anon Read-only" "Users Only" "User Read-only" Privileged] {
         puts -nonewline "<option value=$val [expr {$val == $tmpset(PROTECT) ? " selected" : ""}]>$name"
     }
     puts "</select></td></tr>
         <tr><td style=\"border: 0px solid black;\">Login expires</td><td style=\"border: 0px solid black;\"><input type=text name=EXPIRES size=27 value=\"$tmpset(EXPIRES)\"></td></tr>
         <tr><td style=\"border: 0px solid black;\">Recaptcha privkey</td><td style=\"border: 0px solid black;\"><input type=text name=RECAPTCHA_PRIVATE_KEY size=27 value=\"$tmpset(RECAPTCHA_PRIVATE_KEY)\"></td></tr>
-        <tr><td style=\"border: 0px solid black;\">Recaptcha pubkey</td><td style=\"border: 0px solid black;\"><input type=text name=RECAPTCHA_PUBLIC_KEY size=27 value=\"$tmpset(RECAPTCHA_PUBLIC_KEY)\"></td></tr>
+        <tr><td style=\"border: 0px solid black;\">Recaptcha pubkey</td><td style=\"border: 0px solid black;\"><input type=text name=RECAPTCHA_PUBLIC_KEY size=27 value=\"$tmpset(RECAPTCHA_PUBLIC_KEY)\"></td></tr>"
 
     puts "
 <tr><td style=\"border: 0px solid black;\"></td><td align=center style=\"border: 0px solid black;\">
@@ -230,7 +230,7 @@ update_example();
 # input: form postdata
 # returns: nothing
 proc saveconfig {} {
-    http_auth wiki config
+    if {![authorized wiki config]} { no_auth }
     get_post input
     # checkboxes dont submit any data when not checked, so keep a list of them
     set checkboxes {FILTER_HTML ANON_CREATE}
@@ -293,7 +293,6 @@ proc tzselect {sel} {
 # input: optional query string "status" to display result of save
 # returns: nothing
 proc editprefs {} {
-    http_auth auth verify
     http_header
     html_head "Personal Settings"
     get_input input
@@ -337,11 +336,10 @@ proc hash_pass {pass} {
 # input: form postdata
 # returns: nothing
 proc saveprefs {} {
-    http_auth auth verify
     get_post input
     db function password {hash_pass}
     if {[info exists input(password)] && $input(password) != "" && [info exists input(user)] && $input(user) != ""} {
-        http_auth user password $input(user)
+        if {![authorized user password $input(user)]} { no_auth }
         set user $input(user)
         set pass $input(password)
         if {![validpass $user $pass]} {
@@ -567,26 +565,29 @@ proc diff {lines1 lines2} {
 
 # authenticate and authorize a request
 # input: AUTH cookie and action to authorize
-# returns: an html request for authentication, or the authenticated users level
-proc http_auth {entity action {target {}}} {
-    if {[info exists ::cookies(AUTH)]} {
-        set key $::cookies(AUTH)
-        set ip $::request(REMOTE_ADDR)
-        db eval {select cookies.user,users.name,users.level from users,cookies where cookies.key=$key and cookies.expires>datetime('now') and cookies.ip=$ip and cookies.user=users.user} {}
+# returns: the users level
+proc authenticate {} {
+    global cookies request
+    if {[info exists cookies(AUTH)]} {
+        set key $cookies(AUTH)
+        set ip $request(REMOTE_ADDR)
+        db eval {select cookies.user,users.level from users,cookies where cookies.key=$key and cookies.expires>datetime('now') and cookies.ip=$ip and cookies.user=users.user} {}
     }
     # if no valid cookie found, then set user as anonymous
     if {![info exists user]} {
         # expire an invalid auth cookie if it exists
-        if {[info exists ::cookies(AUTH)]} { set_cookie AUTH "" "5 days ago" }
-        set user $::request(USER)
+        if {[info exists cookies(AUTH)]} { set_cookie AUTH "" "5 days ago" }
+        set request(USER_AUTH) 0
+        set request(USER) anonymous
+        set user anonymous
         set level 5
     } else {
-        set ::request(USER_AUTH) 1
-        set ::request(USER) $user
+        set request(USER_AUTH) 1
+        set request(USER) $user
     }
     # check the db for ip address matches
     db eval {select user as huser,ip,level as hlev from users where ip != '' and (user=$user or user='' or user='*')} {
-        if {[match_ip $ip $::request(REMOTE_ADDR)]} {
+        if {[match_ip $ip $request(REMOTE_ADDR)]} {
            # if the username is an exact match then set the new ip dictated level
            # otherwise we will only lower the level
            if {$huser == $user} {
@@ -596,24 +597,16 @@ proc http_auth {entity action {target {}}} {
            }
         }
     }
-    #http_header
-    #puts "$entity $action $target you: $level"
-    #parray ::env
-    if {$level < 5} {
-        http_error 403 Forbidden
-        close_databases
-        exit
-    }
-    if {[reqlevel $entity $action $target] > $level} { no_auth }
-    return $level
+    if {$level < 5} { http_error 403 Forbidden }
+    set request(USER_LEVEL) $level
 }
 
-proc reqlevel {entity action {target {}}} {
+proc authorized {entity action {target {}}} {
     set reqlevel 30
     switch -glob -- $entity:$action {
         wiki:config { set reqlevel 30 }
         user:password {
-            if {$user != $target} {
+            if {$::request(USER) != $target} {
                 set reqlevel 25
                 set tlev [db onecolumn {select level from users where user=$target}]
                 if {$tlev != "" && $tlev >= 30} { set reqlevel 30 }
@@ -635,6 +628,10 @@ proc reqlevel {entity action {target {}}} {
             set reqlevel [db onecolumn {select protect from nodes where id=$target}]
         }
         node:view {
+            if {$target == ""} {
+                # if target is empty, return the highest node level the user may view
+                return [expr {$::request(USER_LEVEL) + 5}]
+            }
             set reqlevel [db onecolumn {select protect from nodes where id=$target}]
             if {$reqlevel == ""} {
                 # nonexistent or deleted node
@@ -646,18 +643,10 @@ proc reqlevel {entity action {target {}}} {
         }
         *:create {
             set reqlevel 10
-            #if {[db onecolumn {select val from settings where name='ANON_CREATE'}] > 0} {}
-            if {$::settings(ANON_CREATE) > 0} {
-                 set reqlevel 5
-            }
-        }
-        auth:verify {
-            upvar level level
-            if {$level >= 5 && $level < 20} { incr level 5 }
-            set reqlevel 5
+            if {$::settings(ANON_CREATE) > 0} { set reqlevel 5 }
         }
     }
-    return $reqlevel
+    return [expr {$::request(USER_LEVEL) >= $reqlevel}]
 }
 
 # perform exact, glob, or cidr style comparison of ip addresses
@@ -697,7 +686,6 @@ proc http_error {code {text {An error occured}}} {
 # input: form postdata
 # returns: nothing
 proc do_login {} {
-    http_auth auth verify
     get_post input
     db function password {hash_pass}
     if {![info exists input(username)] || ![info exists input(password)]} {
@@ -708,13 +696,17 @@ proc do_login {} {
     set user $input(username)
     set pass $input(password)
     set ip $::request(REMOTE_ADDR)
-    set expires $::settings(EXPIRES)
     if {![db exists {select user from users where user=$user and password=password($pass) and password<>''}]} {
         location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
         db eval {rollback transaction}
         return
     }
+    set_auth_cookie $user [expr {[info exists input(remember)] && $input(remember) == "on" ? $::settings(EXPIRES) : ""}]
+    db eval {commit transaction}
+    location [expr {[info exists input(href)] ? "$input(href)" : ""}]
+}
 
+proc set_auth_cookie {user expires} {
     # create random 32 char auth token
     set chars abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
     set size [string length $chars]
@@ -722,18 +714,12 @@ proc do_login {} {
         append key [string index $chars [expr {int(rand() * $size)}]]
     }
 
-    if {[info exists input(remember)] && $input(remember) == "on"} {
-        set_cookie AUTH $key $expires
-    } else {
-        set_cookie AUTH $key ""
-        set expires "2 days"
-    }
+    set_cookie AUTH $key $expires
+    if {$expires == ""} { set expires "2 days" }
+    set ip $::request(REMOTE_ADDR)
     set expires [clock format [clock scan $expires] -format "%Y-%m-%d %H:%M:%S" -gmt 1]
     db eval {delete from cookies where user=$user and (expires<datetime('now') or ip=$ip)}
     db eval {insert into cookies (user,ip,key,created,expires) values($user,$ip,$key,datetime('now'),$expires)}
-    db eval {commit transaction}
-
-    location [expr {[info exists input(href)] ? "$input(href)" : ""}]
 }
 
 # sets an http cookie
@@ -748,7 +734,6 @@ proc set_cookie {key val expires} {
 
 # logs a user out by deleting any auth tokens from the db and expiring the auth cookie
 proc logout {} {
-    http_auth auth verify
     if {!$::request(USER_AUTH)} {
         location wiki:login
         return
@@ -764,7 +749,6 @@ proc logout {} {
 # input: optional query string "message"
 # returns: nothing
 proc login {} {
-    http_auth auth verify
     http_header
     html_head "Login"
     get_input input
@@ -784,7 +768,7 @@ proc login {} {
          <tr><td style=\"border: 0px;\">Password:</td>
          <td style=\"border: 0px;\"><input type=password name=password></td></tr>"
     if {[info exists input(href)]} { puts "<input type=hidden name=href value=\"$input(href)\">" }
-    puts {<tr><td align=left style="border: 0px; font-size=60%;"><input type=checkbox name=remember checked> Remember me</td><td align=center style="border: 0px;"><input type=submit value="Log In"></td></tr></table></form>}
+    puts {<tr><td align=left style="border: 0px; font-size: 60%;"><input type=checkbox name=remember checked> Remember me</td><td align=center style="border: 0px;"><input type=submit value="Log In"></td></tr></table></form>}
     puts {<script>username = document.getElementById('username'); if (username.value == "") { username.focus(); } else { document.getElementById('password').focus(); }</script>}
     puts {</body></html>}
 }
@@ -796,7 +780,7 @@ proc showpage {id} {
     # select some extra columns so that [dynamic_variable] can upvar them during dynamic parsing
     db eval {select name,parsed,modified,modified_by,created from nodes where id=$id} {}
     if {![info exists name]} { http_error 404 "no such node" }
-    http_auth node view $id
+    if {![authorized node view $id]} { no_auth }
     http_header
     html_head $name
     set page [db onecolumn {select parsed from nodes,tags where tags.name='wiki:header' and tags.node=nodes.id order by nodes.modified desc limit 1}]
@@ -815,7 +799,6 @@ proc showpage {id} {
 # input: none, optional query string "q" which will display results page instead
 # returns: nothing
 proc search {} {
-    http_auth auth verify
     get_input input
     if {[info exists input(q)]} {
         do_search $input(q)
@@ -843,7 +826,7 @@ proc do_search {{q {}}} {
         return
     }
 
-    set level [http_auth auth verify]
+    set level [authorized node view]
     set matches {}
 
     # for tag searches need to remove boolean operators and negated terms to avoid suprious results,
@@ -908,7 +891,7 @@ proc do_search {{q {}}} {
 # input: an exact tag name
 # returns: nothing
 proc showtag {tag} {
-    set level [http_auth auth verify]
+    set level [authorized node view]
     http_header
     html_head "Pages tagged with $tag"
     puts "<h1>Pages tagged with &quot;$tag&quot;</h1><br>"
@@ -927,7 +910,7 @@ proc link {to text} {
 }
 
 proc showhistory {nodeid} {
-    http_auth node view $nodeid
+    if {![authorized node view $nodeid]} { no_auth }
     if {[string match *:* $nodeid]} {
         set nodeid [split $nodeid :]
         if {[llength $nodeid] == 2} {
@@ -1056,7 +1039,7 @@ proc viewhistory {node rev} {
 }
 
 proc deletefile {id} {
-    http_auth file delete $id
+    if {![authorized file delete $id]} { no_auth }
     db eval {select filename from files where id=$id} {}
     catch {file delete $filename}
     db eval {delete from files where id=$id}
@@ -1140,7 +1123,7 @@ proc wikitag {name} {
 
 proc taglist {} {
     get_input a
-    set level [http_auth auth verify]
+    set level [authorized node view]
     http_header
     html_head "Tag list"
     if {[info exists a(sort)]} { set sort $a(sort) }
@@ -1210,12 +1193,12 @@ proc pagination {input per link total} {
 }
 
 proc nodelist {} {
-    set level [http_auth auth verify]
+    set level [authorized node view]
     get_input a
     http_header
     html_head "Node list"
 
-    array set perm { 5 R/W 10 R/O 15 "User R/O" 20 "Hidden" 25 "Priv" }
+    set perm { 10 R/O 15 User 20 "User R/O" 25 Priv 5 R/W }
     if {[info exists a(sort)]} { set sort $a(sort) }
     sortable sort order {name created modified perms} {"lower(name)" "created desc" "modified desc" protect}
     pagination a 200 wiki:nodes [db onecolumn {select count(id) from nodes}]
@@ -1224,7 +1207,7 @@ proc nodelist {} {
          <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
          <table class=wikilist>[th $sort {Name 1} {Created 1} {Modified 1} {Perms 1} {Links 0} {Tags 0}]"
     db eval "select id,name,created,modified,protect from nodes where protect<=$level and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset $offset" {
-        puts "<tr><td>[link node:$id $name]</td><td>[format_time $created]</td><td>[format_time $modified]</td><td align=center>$perm($protect)</td>"
+        puts "<tr><td>[link node:$id $name]</td><td>[format_time $created]</td><td>[format_time $modified]</td><td align=center>[string map $perm $protect]</td>"
         puts "<td align=center>[link links:$id [db eval {select count(node) from links where target=$id and type='node'}]]</td><td>"
         db eval {select name from tags where node=$id} {
             puts "[link tag:$name $name] "
@@ -1253,7 +1236,6 @@ proc th {sort args} {
 }
 
 proc filelist {} {
-    http_auth auth verify
     db function fsize {file_size}
     get_input a
     http_header
@@ -1297,7 +1279,7 @@ proc format_filesize {size} {
 # input: none
 # returns: nothing
 proc upload {} {
-    http_auth file create
+    if {![authorized file create]} { no_auth }
     http_header
     html_head "File upload"
     puts "<h1>File upload</h1><br><br>"
@@ -1311,7 +1293,7 @@ puts "<input type=submit value=Upload></td></tr></table></form>"
 # input: an existing file id or "new"
 # returns: nothing
 proc upload_post {id} {
-    http_auth file create
+    if {![authorized file create]} { no_auth }
     fconfigure stdin -encoding binary -translation lf
     set data [read stdin]
     # decode the mime data:
@@ -1685,10 +1667,7 @@ proc static_options {id opt data} {
         tags {
             foreach x [lrange [split $data] 1 end] {
                 if {$x == ""} { continue }
-                if {[string match wiki:* $x]} {
-                    upvar 2 level level
-                    if {$level < [reqlevel node wikitag]} { continue }
-                }
+                if {[string match wiki:* $x] && ![authorized node wikitag]} { continue }
                 db eval {insert or ignore into tags (name,node) values(lower($x),$id)}
             }
             return
@@ -2007,8 +1986,8 @@ proc get_input {var} {
     if {![info exists a]} { array set a {} }
 }
 
-proc get_cookies {var} {
-    upvar $var cookies
+proc get_cookies {} {
+    global cookies
     unset -nocomplain cookies
     if {![info exists ::request(HTTP_COOKIE)]} { return }
     array set cookies {}
@@ -2065,13 +2044,13 @@ proc savepage {id} {
     if {$id != "new"} {
         db eval {select content,protect,strftime('%s',modified) as modified from nodes where id=$id} {}
         if {![info exists content]} { http_error 404 "no such node" }
-        set level [http_auth node [expr {$input(content) == "delete" ? "delete" : "edit"}] $id]
+        if {![authorized node [expr {$input(content) == "delete" ? "delete" : "edit"}] $id]} { no_auth }
         if {$input(editstarted) < $modified} {
             db eval {select tf(modified) as modified,modified_by from nodes where id=$id} {}
             db eval {rollback transaction}
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
-        if {!$::request(USER_AUTH) && ![verify_captcha input]} { http_error 403 }
+        if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
         if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $protect }
         if {$input(content) == $content} {
             db eval {update nodes set name=$input(name),protect=$input(protect) where id=$id}
@@ -2095,9 +2074,9 @@ proc savepage {id} {
         }
         set new 0
     } else {
-        set level [http_auth node create]
-        if {!$::request(USER_AUTH) && ![verify_captcha input]} { http_error 403 }
-        if {![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $level }
+        if {![authorized node create]} { no_auth }
+        if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
+        if {![string is integer -strict $input(protect)] || $input(protect) > $::request(USER_LEVEL)} { set input(protect) $::request(USER_LEVEL) }
         db eval {insert into nodes (name,content,protect) values($input(name),$input(content),$input(protect)}
         set id [db last_insert_rowid]
         set new 1
@@ -2154,7 +2133,7 @@ proc showpagebyname {name} {
 proc showlinks {id} {
     db eval {select name from nodes where id=$id} {}
     if {![info exists name]} { http_error 404 "no such node" }
-    http_auth node view $id
+    if {![authorized node view $id]} { no_auth }
     http_header
     html_head "Pages linking to $name"
     puts "<h1>Links to &quot;$name&quot;</h1><br>"
@@ -2186,20 +2165,22 @@ proc close_databases {} {
 proc settings {} {
     global cookies settings
     db eval {select * from settings} { set settings($name) $val }
-    get_cookies cookies
     foreach x {TZ TF} {
         if {[info exists cookies($x)]} { set settings($x) $cookies($x) }
     }
 }
 
 proc service_request {} {
+    get_cookies
+    authenticate
     settings
+    #parray request
 
     #set doc [split [string range $::request(PATH_TRANSLATED) [string length [file dirname [info script]]/] end] :]
     set doc [split [file tail $::request(PATH_INFO)] :]
     set cmd [lindex $doc 0]
     set arg [join [lrange $doc 1 end] :]
-
+ 
     if {$::request(REQUEST_METHOD) == "GET"} {
         switch -exact -- $cmd {
             index.html { wikitag home }
@@ -2258,8 +2239,6 @@ if {[info exists env(GATEWAY_INTERFACE)]} {
     foreach x {CONTENT_TYPE HTTP_COOKIE} {
         if {[info exists env($x)]} { set request($x) $env($x) }
     }
-    set request(USER) anonymous
-    set request(USER_AUTH) 0
     service_request
     close_databases
 
