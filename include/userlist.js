@@ -1,6 +1,6 @@
 function selectRow(e) {
-  var o = $("#list > .selected");
-  $(o).removeClass("selected");
+  var o = $("#list > .selected_row");
+  $(o).removeClass("selected_row");
   $(o).find("td:first").empty();
 
   var n = $(e.target).closest("tr");
@@ -8,7 +8,7 @@ function selectRow(e) {
   var level = $(n).find("td:eq(7)").text();
   if (userlevel < levels[level]) { return false; }
 
-  $(n).addClass("selected");
+  $(n).addClass("selected_row");
   $(n).find("td:first").html("<a href=# id=edit>edit</a><br><br><a href=# id=delete>delete</a>");
   $("#edit").bind("click", editUser);
   $("#delete").bind("click", deleteUser);
@@ -30,7 +30,7 @@ function editUser(e) {
 
   var level = $(row).find("td:eq(7)");
   t[7] = $(level).text();
-  var html = "<select name=level><option value=0>Blocked</option><option value=10>Base</option><option value=20>Edit</option><option value=25>Privileged</option>";
+  var html = "<select name=level><option value=0>Blocked</option><option value=10>Read-only</option><option value=20>Normal</option><option value=25>Privileged</option>";
   if (userlevel >= 30) { html += "<option value=30>Admin</option>"; }
   html += "</select>";
   $(level).html(html);
@@ -48,7 +48,7 @@ function editUser(e) {
 
 function cancelEdit(e) {
   var row = $(e.target).closest("tr");
-  $(row).removeClass("selected");
+  $(row).removeClass("selected_row");
   $(row).find("td:first").empty();
   $(row).find("td:gt(1):lt(4)").each(function(i) {
     $(this).empty();
@@ -81,14 +81,14 @@ function deleteUserComplete(result) {
   if (result.result != "ok") {
     return false;
   }
-  //$(".selected").slideUp("slow", function() { $(".selected").remove(); $("#list").bind("click", selectRow); });
-  $(".selected").remove();
+  //$(".selected_row").slideUp("slow", function() { $(".selected_row").remove(); $("#list").bind("click", selectRow); });
+  $(".selected_row").remove();
   $("#list").bind("click", selectRow);
 }
 
 function saveEditComplete(data) {
-  var row = $(".selected");
-  $(row).removeClass("selected");
+  var row = $(".selected_row");
+  $(row).removeClass("selected_row");
   $(row).html(data);
   $("#list").bind("click", selectRow);
 }
@@ -104,19 +104,19 @@ function newUser() {
     <td></td> \
     <td><select name=level> \
       <option value=0>Blocked</option> \
-      <option value=10 selected>Base</option> \
-      <option value=20>Edit</option> \
+      <option value=10>Read-only</option> \
+      <option value=20 selected>Normal</option> \
       <option value=25>Privileged</option> \
       <option value=30>Admin</option> \
     </td></tr>";
 
-  var o = $("#list > .selected");
-  $(o).removeClass("selected");
+  var o = $("#list > .selected_row");
+  $(o).removeClass("selected_row");
   $(o).find("td:first").empty();
 
   $("#list").append(html);
   var row = $("#list > tr:last");
-  $(row).addClass("selected");
+  $(row).addClass("selected_row");
   $("form > input[name='action']").attr("value", "new");
 
   $("#list").unbind("click", selectRow);

@@ -20,8 +20,7 @@ proc userlist {} {
     pagination a 50 wiki:users [db onecolumn {select count(user) from users}]
 
     html_head "User list" {
-        <script src="include/jquery-1.3.2.min.js"></script>
-        <style>.selected { background: gray; }</style>}
+        <script src="include/jquery-1.3.2.min.js"></script>}
 
     puts "<h1>User List</h1><br>
         <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
@@ -39,7 +38,7 @@ proc userlist {} {
              <td>$name</td>
              <td>$email</td>
              <td>[format_time $created]</td>
-             <td>[string map {10 Read-only 20 Normal 25 Privileged 30 Admin 0 Blocked} $::request(USER_LEVEL)]</td></tr>"
+             <td>[string map {10 Read-only 20 Normal 25 Privileged 30 Admin 0 Blocked} $level]</td></tr>"
     }
     puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a></form></td></tr></table>
         <script src=\"include/userlist.js\"></script></body></html>"
@@ -507,7 +506,7 @@ proc create_history_entry {id} {
     set type full
     #db eval {select id as lastfullid,content as lastfull from history where original=$id and type='full' order by id desc limit 1} {}
     #if {[info exists lastfull] && [db onecolumn {select count(id) from history where original=$id and id>$lastfullid}] < 20} {
-    #    set diff [diff $new $lastfull]
+    #    set diff [diff [split $lastfull \n] [split $content \n]]
     #    if {[llength [join $diff]] <= 45} {
     #        set type diff
     #        set content $diff
@@ -1183,9 +1182,9 @@ proc pagination {input per link total} {
 
     if {$lastpage > 0} {
         set nav "<tr>
-            <td class=pagination-nav id=prev>[expr {$page > 0 ? [link [params $link a page [expr {$page - 1}]] "<< prev"] : ""}]</td>
-            <td class=pagination-nav id=page>[expr {$page + 1}] / [expr {$lastpage + 1}]</td>
-            <td class=pagination-nav id=next>[expr {$page < $lastpage ? [link [params $link a page [expr {$page + 1}]] "next >>"] : ""}]</td>
+            <td class=pagination_nav id=prev>[expr {$page > 0 ? [link [params $link a page [expr {$page - 1}]] "&#9668; prev"] : ""}]</td>
+            <td class=pagination_nav id=page>[expr {$page + 1}] / [expr {$lastpage + 1}]</td>
+            <td class=pagination_nav id=next>[expr {$page < $lastpage ? [link [params $link a page [expr {$page + 1}]] "next &#9658;"] : ""}]</td>
             </tr>"
     } else {
         set nav ""
@@ -2051,7 +2050,7 @@ proc savepage {id} {
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
-        if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $level} { set input(protect) $protect }
+        if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $::request(USER_LEVEL)} { set input(protect) $protect }
         if {$input(content) == $content} {
             db eval {update nodes set name=$input(name),protect=$input(protect) where id=$id}
             db eval {commit transaction}
