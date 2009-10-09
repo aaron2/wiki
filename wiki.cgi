@@ -1882,19 +1882,20 @@ proc db_auth {action table col db view} {
 
 proc setup_interp {} {
     set i [interp create]
+    set level [authorized node view]
     interp alias $i file {} filewrapper
     interp alias $i sql {} interp invokehidden $i db eval
     interp alias $i puts {} append output
     foreach x {myself link format_filesize get_input filter_html unescape format_time db_auth} {
         interp alias $i $x {} $x
     }
-    interp eval $i {
+    interp eval $i "
         load /usr/local/lib/sqlite3.6.17/libsqlite3.6.17.so Sqlite3
         sqlite3 db wiki.db -readonly 1
         db function tf format_time
-        db eval {create temp view pages as select * from nodes where protect<=20}
+        db eval \"create temp view pages as select * from nodes where protect<=$level\"
         db authorizer db_auth
-    }
+    "
     interp eval $i [list array set request [array get ::request]]
     foreach x {load source open exec socket rename proc cd sqlite sqlite3 db interp} {
         interp hide $i $x
