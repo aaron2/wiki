@@ -1650,6 +1650,7 @@ proc static_variable {var} {
         BROWN -
         GRAY -
         BLACK { return "<span style=\"color: [string tolower $var];\">" }
+        END -
         ENDCOLOR { return "</span>" }
         default { return %$var% }
     }
@@ -2077,7 +2078,7 @@ proc savepage {id} {
         if {![authorized node create]} { no_auth }
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
         if {![string is integer -strict $input(protect)] || $input(protect) > $::request(USER_LEVEL)} { set input(protect) $::request(USER_LEVEL) }
-        db eval {insert into nodes (name,content,protect) values($input(name),$input(content),$input(protect)}
+        db eval {insert into nodes (name,content,protect) values($input(name),$input(content),$input(protect))}
         set id [db last_insert_rowid]
         set new 1
     }
