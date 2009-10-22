@@ -1688,7 +1688,7 @@ proc static_http {data} {
         }
     } else {
         if {[string length $data] > 60} {
-           set name [lindex [split $data ?] 0]]
+           set name [lindex [split $data ?] 0]
            if {[string length $name] > 60} {
                return "<a href=\"$data\">[string range $name 0 25]...[string range $name end-20 end]</a>"
            }
