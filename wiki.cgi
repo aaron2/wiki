@@ -925,6 +925,7 @@ proc showhistory {nodeid} {
     db eval {select name,tf(modified) as modified,modified_by,content as currcontent from nodes where id=$nodeid} {}
     if {![info exists name] && ![db exists {select original from history where original=$nodeid limit 1}]} {
         http_error 404 "no such node"
+        set currcontent {}
     }
     set currev [db onecolumn {select count(id) from history where original=$nodeid}]
     get_input a
@@ -938,7 +939,7 @@ proc showhistory {nodeid} {
 
     pagination a 200 history:$nodeid $currev
     unset -nocomplain ::lastfull
-    set history [list]
+    set history [list [list {} {} {} full $currcontent]]
     set rev [expr {$currev - $offset}]
     db eval {select type,created,created_by,content from history where original=$nodeid order by created desc limit $perpage+1 offset $offset} {
         incr rev -1
@@ -955,19 +956,19 @@ proc showhistory {nodeid} {
 
     if {$page == 0} {
         if {![info exists name]} {
-            puts "<tr><td align=center>-</td><td>[lindex $history 0 1]</td><td>[lindex $history 0 2]</td>
+            puts "<tr><td align=center>-</td><td>[lindex $history 1 1]</td><td>[lindex $history 1 2]</td>
                 <td align=center>-[linechange 0 $history]</td>
-                <td align=right>[link history:$nodeid:[lindex $history 0 0]:[lindex $history 1 0] prev]</td></tr>"
-            set history [lrange $history 1 end]
+                <td align=right>[link history:$nodeid:[lindex $history 1 0]:[lindex $history 2 0] prev]</td></tr>"
+            set next 2
         } else {
             puts "<tr><td align=center>[link node:$nodeid $currev]</td><td>$modified</td><td>$modified_by</td>
-                <td align=center>[linechange 0 [linsert $history 0 [list {} {} {} full $currcontent]]]</td>
-                <td align=right>[link history:$nodeid:C:[lindex $history 0 0] prev]</td></tr>"
+                <td align=center>[linechange 0 $history]</td>
+                <td align=right>[link history:$nodeid:C:[lindex $history 1 0] prev]</td></tr>"
+            set next 1
         }
     }
 
-    set next 0
-    foreach x [lrange $history 0 end-1] {
+    foreach x [lrange $history $next end-1] {
         incr next
         foreach {rev created created_by} $x break
         puts "<tr><td align=center>[link history:$nodeid:$rev $rev]</td><td>$created</td><td>$created_by</td>
@@ -1005,8 +1006,12 @@ proc linechange {i list} {
     } else {
         set lastfull [lsearch -exact -index 3 -start [expr {$i + 1}] $list full]
         set lines [expr {[llength [regexp -all -inline {[^\n]\n} [lindex $list $lastfull 4]]] + 1}]
-        set diff [lindex $list $i+1 4]
-        set b [expr {$lines + 1 - [llength [lindex $diff 0]] + ([llength [lindex $diff 1]] / 2)}]
+        if {$lastfull == $i+1} {
+            set b $lines
+        } else {
+            set diff [lindex $list $i+1 4]
+            set b [expr {$lines + 1 - [llength [lindex $diff 0]] + ([llength [lindex $diff 1]] / 2)}]
+        }
     }
 
     return [expr {$a - $b}]
@@ -1027,14 +1032,17 @@ proc viewhistory {node rev} {
     }
     puts "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[link history:$node:[lindex $revs 0] <] [link history:$node "(rev [lindex $revs 1])"] [link history:$node:[lindex $revs 2] >]"
     puts "&nbsp;&nbsp;&nbsp;&nbsp;[link history:$node:[expr {$rev - 1}]:$rev "compare to previous"]"
+    puts "&nbsp;&nbsp;&nbsp;&nbsp;[link history:$node:$rev?formatting "view with formatting"]"
     puts "<br><hr>"
-    # its a good idea but parsing has side effects
-    #get_input a
-    #if {[info exists a(formatting)]} {
-    #    puts "[parse_dynamic $node [parse_static $node [get_history_content $id]]]"
-    #}
-    set content [string map {& &amp;} [get_history_content $id]]
-    puts "<pre>[filter_html $content]</pre><hr>"
+    get_input a
+    if {[lsearch -glob [array names a] format*] > -1} {
+        db eval {begin transaction}
+        puts [parse_dynamic $node [parse_static $node [get_history_content $id]]]
+        db eval {rollback transaction}
+    } else {
+        set content [string map {& &amp;} [get_history_content $id]]
+        puts "<pre>[filter_html $content]</pre><hr>"
+    }
 }
 
 proc deletefile {id} {
