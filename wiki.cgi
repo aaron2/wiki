@@ -24,7 +24,7 @@ proc userlist {} {
 
     puts "<h1>User List</h1><br>
         <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
-        <form action=\"[myself]/users\" method=post>
+        <form action=\"users\" method=post>
         <input type=hidden name=user>
         <input type=hidden name=action>
         <input type=hidden name=userlevel value=$::request(USER_LEVEL)>
@@ -101,7 +101,7 @@ proc editor {userlevel objectlevel action name content back} {
           <div><input type=submit value=Save style=\"padding-left: 1em; padding-right: 1em;\">
           <input type=button name=cancel value=Cancel onclick=\"javascript:$back;\" style=\"margin-left: 2em;\">
           <input type=hidden name=editstarted value=[clock seconds]>
-          <a style=\"position: absolute; right: 50%;\" href=[myself]/tag:wiki:help>Help</a>
+          <a style=\"position: absolute; right: 50%;\" href=./tag:wiki:help>Help</a>
           <script src=\"include/editor.js\"></script>"
 
     if {$objectlevel != "" && $::request(USER_AUTH)} {
@@ -112,7 +112,7 @@ proc editor {userlevel objectlevel action name content back} {
         }
         puts "</select>"
     } elseif {!$::request(USER_AUTH)} {
-        puts "<a href=\"[myself]/wiki:login\" style=\"position: absolute; right: 1em;\">login</a>"
+        puts "<a href=\"./wiki:login\" style=\"position: absolute; right: 1em;\">login</a>"
     }
     puts "</div></form>"
 }
@@ -126,7 +126,7 @@ proc editnode {id args} {
         http_header
         html_head "Creating new page"
         puts "<h1>Creating new page</h1><br>"
-        set action [myself]/new
+        set action new
         set name [lindex $args 0]
         set content [lindex $args 1]
         set back "history.go(-1)"
@@ -137,10 +137,10 @@ proc editnode {id args} {
         if {![authorized node edit $id]} { no_auth }
         http_header
         html_head "Editing $name"
-        set action [myself]/edit:$id
+        set action ./edit:$id
         set content [string map {& &#38;} $content]
         regsub "^\n" $content "\\&nbsp;\n" content
-        set back "document.location='[myself]/node:$id'"
+        set back "document.location='./node:$id'"
     }
     editor $::request(USER_LEVEL) $protect $action $name $content $back
     if {!$::request(USER_AUTH) && $::settings(RECAPTCHA_PRIVATE_KEY) != ""} {
@@ -162,7 +162,7 @@ proc editconfig {} {
     db eval {select name,val from settings} { set tmpset($name) $val }
 
     if {[info exists input(status)]} { puts "<center>[filter_html $input(status)]</center><br><br>" }
-    puts "<form name=form action=\"[myself]/config\" method=post><table style=\"border: 0px solid black;\"><tr><td style=\"\"><table style=\"border: 0px solid black;\"> 
+    puts "<form name=form action=\"config\" method=post><table style=\"border: 0px solid black;\"><tr><td style=\"\"><table style=\"border: 0px solid black;\"> 
           <tr><td style=\"border: 0px solid black;\">Title prefix</td>
           <td style=\"border: 0px solid black;\"><input type=text name=NAME size=27 value=\"$tmpset(NAME)\"></td>
           <td style=\"border: 0px solid black;\"></td>
@@ -296,7 +296,7 @@ proc editprefs {} {
     html_head "Personal Settings"
     get_input input
     if {[info exists input(status)]} { puts "<center>[filter_html $input(status)]</center><br><br>" }
-    puts "<form name=form action=\"[myself]/prefs\" method=post><table style=\"border: 0px;\"><tr><td style=\"\">
+    puts "<form name=form action=\"prefs\" method=post><table style=\"border: 0px;\"><tr><td style=\"\">
           <table style=\"border: 0px;\">
           <tr><td style=\"border: 0px;\">Time zone</td><td style=\"border: 0px;\">[tzselect $::settings(TZ)]</td>
           <td rowspan=2 style=\"border: 0px;\">Example:<br>[format_time [clock format [clock seconds] -gmt 1]]<br>
@@ -567,6 +567,10 @@ proc diff {lines1 lines2} {
 # returns: the users level
 proc authenticate {} {
     global cookies request
+    if {$request(REMOTE_ADDR) == "127.0.0.1"} {
+        array set request {USER_AUTH 1 USER localhost USER_LEVEL 30}
+        return
+    }
     if {[info exists cookies(AUTH)]} {
         set key $cookies(AUTH)
         set ip $request(REMOTE_ADDR)
@@ -669,7 +673,6 @@ proc match_ip {pattern ip} {
 proc no_auth {} {
     set loc [file tail $::request(PATH_INFO)]
     location wiki:login[expr {$loc == "index.html" ? "" : "?href=$loc"}]
-    close_databases
     exit
 }
 
@@ -677,7 +680,6 @@ proc http_error {code {text {An error occured}}} {
     puts "Status: $code"
     puts "Content-type: text/html\n"
     puts "<html><head><title>Error $code</title></head><body>$text</body></html>"
-    close_databases
     exit
 }
 
@@ -761,7 +763,7 @@ proc login {} {
     } elseif {$::request(USER) != "anonymous"} {
         set user $::request(USER)
     }
-    puts "<form action=\"[myself]/login\" method=post>
+    puts "<form action=\"login\" method=post>
          <table style=\"border: 0px;\"><tr><td style=\"border: 0px;\">Username:</td>
          <td style=\"border: 0px;\"><input name=username id=username value=\"$user\"></td></tr>
          <tr><td style=\"border: 0px;\">Password:</td>
@@ -806,7 +808,7 @@ proc search {} {
     http_header
     html_head "Search"
     puts "<h1>Search</h1><br>"
-    puts "<center><form name=search method=post action=[myself]/search><input name=string size=60><br><input type=submit value=Search></form></center>"
+    puts "<center><form name=search method=post action=search><input name=string size=60><br><input type=submit value=Search></form></center>"
 }
 
 # perform a search and display the results
@@ -866,7 +868,7 @@ proc do_search {{q {}}} {
         http_header
         html_head "Search results"
         puts "<h1>Search results</h1><br>"
-        puts "<form name=search method=post action=[myself]/search>Searched for <input name=string value=\"$term\" size=30> <input type=submit value=\"Search Again\"></form>"
+        puts "<form name=search method=post action=search>Searched for <input name=string value=\"$term\" size=30> <input type=submit value=\"Search Again\"></form>"
     }
 
     if {$::request(USER) != "anonymous" && !$::request(USER_AUTH)} {
@@ -899,13 +901,8 @@ proc showtag {tag} {
     }
 }
 
-# returns an http address pointing to the wiki root
-proc myself {} {
-    return http://$::request(HTTP_HOST)[expr {$::request(SERVER_PORT) != "80" ? ":$::request(SERVER_PORT)" : ""}][string trimright [file dirname $::request(PATH_INFO)] /]
-}
-
 proc link {to text} {
-    return "<a href=\"[myself]/$to\">$text</a>"
+    return "<a href=\"./$to\">$text</a>"
 }
 
 proc showhistory {nodeid} {
@@ -1063,7 +1060,7 @@ proc showfile {id} {
     lappend ::auto_path packages
     puts "<script type=\"text/javascript\">
         function confirmation() {
-	if (confirm(\"Delete file\\n$name?\")) { document.forms\[0].action = \"[myself]/delete:$id\"; document.forms\[0].submit(); }
+	if (confirm(\"Delete file\\n$name?\")) { document.forms\[0].action = \"./delete:$id\"; document.forms\[0].submit(); }
         }
         </script>"
     set filepath [filepath $filename]
@@ -1084,7 +1081,7 @@ proc showfile {id} {
         set info "<i>file not found</i>"
     }
     puts "<h1>File Information: $name</h1><br><br>
-         <form method='POST' enctype='multipart/form-data' action='[myself]/upload:$id'>
+         <form method='POST' enctype='multipart/form-data' action='./upload:$id'>
          <table><tr><td>Name:</td><td><input type=text name=name value=\"$name\" size=60></td></tr>
          <tr><td>Filename:</td><td><a href=\"files/$filename\">$filename</a></td></tr>
          <tr><td>Original name:</td><td>$original_name</td></tr>
@@ -1290,7 +1287,7 @@ proc upload {} {
     http_header
     html_head "File upload"
     puts "<h1>File upload</h1><br><br>"
-    puts "<form method='POST' enctype='multipart/form-data' action='[myself]/upload:new'>"
+    puts "<form method='POST' enctype='multipart/form-data' action='./upload:new'>"
     puts "<table><tr><td><table style=\"border: 0px;\"><tr><td style=\"border: 0px;\">File:</td><td style=\"border: 0px;\"><input type=file name=filedata size=60></td></tr>"
     puts "<tr><td style=\"border: 0px;\">Name:</td><td style=\"border: 0px;\"><input type=text name=name size=60></td></tr></table></td></tr><tr><td colspan=2 align=center>"
 puts "<input type=submit value=Upload></td></tr></table></form>"
@@ -1390,7 +1387,7 @@ proc location {loc args} {
     #    if {$x != ""} { lappend qs $x }
     #}
     #if {[llength $qs] > 0} { append loc ?[join $qs &] }
-    puts "Location: [myself]/$loc\n"
+    puts "Location: ./$loc\n"
 }
 
 proc html_head {title args} {
@@ -1401,10 +1398,10 @@ proc html_head {title args} {
         puts "<style>\n$parsed\n</style>\n"
     }
     #foreach x [glob -nocomplain auto_include/*.css] {
-    #    puts "<link rel=stylesheet href=[myself]/$x>"
+    #    puts "<link rel=stylesheet href=$x>"
     #}
     #foreach x [glob -nocomplain auto_include/*.js] {
-    #    puts "<script href=[myself]/$x></script>"
+    #    puts "<script href=$x></script>"
     #}
     puts "</head><body>"
 }
@@ -1799,10 +1796,10 @@ proc static_call {id cmd data} {
         }
         wiki {
            if {$data == "searchembed"} {
-               return "<form name=search method=post action=[myself]/search><input name=string> <input type=submit value=Search>"
+               return "<form name=search method=post action=search><input name=string> <input type=submit value=Search>"
            }
            if {$data == "uploadembed"} {
-               return "<form method='POST' enctype='multipart/form-data' action='[myself]/upload:new'>
+               return "<form method='POST' enctype='multipart/form-data' action='./upload:new'>
                        <input type=submit value=Upload><input type=file name=filedata></form>"
            }
            if {[string match tag:* $data]} {
@@ -1844,7 +1841,6 @@ proc dynamic_variable {var} {
         ID { upvar 2 id id; return $id }
         NAME { upvar 2 name name; return [filter_html $name] }
         PATH { return [string trimright [file dirname $::request(PATH_INFO)] /]/ }
-        WIKI { return [myself] }
         WIKINAME { return $::settings(NAME) }
         TAGS {
             upvar 2 id id
@@ -1859,9 +1855,9 @@ proc dynamic_variable {var} {
         USERADDRESS { return [lindex [split $::request(USER) @] 1] }
         LOGIN {
             if {$::request(USER_AUTH)]} {
-                return "logged in as $::request(USER) - <a href=\"[myself]/wiki:logout\">logout</a>"
+                return "logged in as $::request(USER) - <a href=\"./wiki:logout\">logout</a>"
             } else {
-                puts "<a href=\"[myself]/wiki:login\">login</a>"
+                puts "<a href=\"./wiki:login\">login</a>"
             }
         }
         default { return $var }
@@ -1895,7 +1891,7 @@ proc setup_interp {} {
     interp alias $i file {} filewrapper
     interp alias $i sql {} interp invokehidden $i db eval
     interp alias $i puts {} append output
-    foreach x {myself link format_filesize get_input filter_html unescape format_time db_auth} {
+    foreach x {link format_filesize get_input filter_html unescape format_time db_auth} {
         interp alias $i $x {} $x
     }
     interp eval $i "
@@ -2166,11 +2162,6 @@ proc open_databases {} {
     db timeout 3000
 }
 
-proc close_databases {} {
-    db close
-    fts close
-}
-
 proc settings {} {
     global cookies settings
     db eval {select * from settings} { set settings($name) $val }
@@ -2241,19 +2232,10 @@ set t [time {
 
 open_databases
 if {[info exists env(GATEWAY_INTERFACE)]} {
-    foreach x {REMOTE_ADDR HTTP_HOST PATH_INFO \
-        REQUEST_URI SERVER_PORT PATH_TRANSLATED \
-        DOCUMENT_ROOT QUERY_STRING SCRIPT_FILENAME \
-        REQUEST_METHOD} { set request($x) $env($x) }
-    foreach x {CONTENT_TYPE HTTP_COOKIE} {
-        if {[info exists env($x)]} { set request($x) $env($x) }
-    }
+    array set request [array get env]
     service_request
-    close_databases
 
     if {[info exists TimeProfilerMode]} { TimeProfilerDump description }
-} else {
-    proc close_databases {} {}
 }
 
 }]
