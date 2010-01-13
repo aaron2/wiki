@@ -1,0 +1,17 @@
+?tags: wiki:recent wiki:hide
+
+%tcl{
+
+set last ""
+sql {select id,name,modified_by,date(modified,'localtime') as day,strftime('%H:%M',modified,'localtime') as time from pages order by modified desc limit 50} {
+    if {$last != $day} {
+        set last $day
+        puts "</ul><h3>$day</h3><ul>"
+    }
+    puts "<li>$time [link node:$id $name] $modified_by"
+}
+
+}%
+
+</ul>
+

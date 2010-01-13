@@ -1,0 +1,7 @@
+?tags: wiki:hide
+
+%tcl{
+sql {select id,name from files where id not in (select target from links where type='file')} { puts "[link file:$id $name]<br>"
+}
+
+}%

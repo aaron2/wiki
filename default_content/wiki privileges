@@ -1,0 +1,73 @@
+?tags: wiki:help
+
++++User levels+
+
+|+Name|+Num|+Description|
+|Blocked|0|No access|
+|Anonymous|5|Can edit Read/Write nodes, and view Anon Read-only and Anon Append-only nodes|
+|Read-only|10|Can view all nodes not set to privileged or admin|
+|Normal|20|Can view and edit all nodes except Privileged and Admin nodes|
+|Privileged|25|Can delete files and nodes. Can edit users|
+|Admin|30|Can change wiki settings|
+
+
++++Node Permissions+
+
+|+Name|+Level|+Description|
+|All Read/Write|5|Anyone may edit|
+|Anon Append-only|7|Anon may view or append only, any logged in user may edit|
+|Anon Read-only|10|Anon may view only, any Normal user may edit|
+|Normal|15|Anon cannot view. Read-only users may view. Normal users may view and edit.|
+|Append-only|17|Anon cannot view. Read-only users may view. Normal users may view and append only. Privileged or Admin users may edit|
+|User Read-only|20|Anon cannot view. Read-only and Normal users may view. Privileged or Admin users may edit|
+|Privileged|25|Only Privileged and Admin users may view or edit|
+|Admin|30|Only Admins may view or edit|
+
+
+|| *All Read/Write* | *Anon Read-Only* | *User Read-Only* | *Private* | *Privileged* |
+| *Blocked* |Nothing|Nothing|Nothing|Nothing|Nothing|
+| *Anonymous* |Read/Write|Read|Nothing|Nothing|Nothing|
+| *Base* |Read/Write|Read/Write|Read|Nothing|Nothing|
+| *Edit* |Read/Write|Read/Write|Read/Write|Read/Write|Nothing|
+| *Privileged* |Read/Write/Delete|Read/Write/Delete|Read/Write/Delete|Read/Write/Delete|Read/Write/Delete|
+| *Admin* |Read/Write|Read/Write|Read/Write|Read/Write|Read/Write|
+
++++Other Permissions+
+
+|Create new content|Anon or User depending on config|
+|Delete File|Privileged|
+|User Admin|Privileged|
+|Wiki Configuration|Admin|
+|Create new admins|Admin|
+
+
+<pre>
+# 0        5    10   20    25        30
+# blocked anon base edit privledged admin
+# edit and up can always edit/view
+# priv to delete nodes and files, add users
+# admin for config and admin users
+# need setting for level required to create new
+
+# node level
+# the setting is whether anon or base can read or write, since edit and higher can always edit
+# default, r/w = any edit, anon r/o = anon read base edit, logged in r/o, hidden = anon base cant read, priv
+#    0                5                     10                  15                20                     25
+  
+# VIEW
+# if node is X then user needs Y
+#            5                 5
+#           10                 5
+#           15                10
+#           20                20
+#           25                25
+        
+# EDIT
+# if node is X then user needs Y   view/edit
+#            5                 5    SAME
+#           10                10    DIFF
+#           15                15    DIFF
+#           20                20    SAME
+#           25                25    SAME
+</pre>
+

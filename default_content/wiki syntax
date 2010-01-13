@@ -1,0 +1,112 @@
+ 
+
+%TOC%
+
++++Mission+
+shorthand: make the common cases simple
+
+html: dont impede the complex cases
+
+what html is allowed? everything in the whitelist. or html may be turned off by the administrator.
+
+
++++Links, Files, and Images+
+link:number
+
+link&#58;(name) no nesting parens
+
+img:number
+
+img&#58;(name) no nesting parens
+
+img&#58;(name 100x100) no nesting parens
+
+img&#58;(number 50x50) no nesting parens
+
+file:number
+
+file&#58;(name) no nesting parens
+
+names are resolved to node id at save time, if the name changes the link
+will be good until you resave without updating the name.
+
+++++Wiki meta links+
+wiki&#58;(search|searchembed|upload|uploadembed|meta|nodes|files|tag:name|tags)
+
+++++External links+
+img&#58;http:// external image
+
+http&#58;// external links automatically parsed
+
+(name)&#58;http&#58;// external link with link name
+
++++Options+
+?option&#58; entire line
+
+only option is tags
+
++++Embedded scripts+
+&#37;tcl{
+
+multiline, nested braces, no substitutions, scripts must emit html using "write" command
+
+}%
+
++++Variables+
+&#37;TOC%
+
+&#37;NAME%
+
+&#37;PATH%
+
+&#37;TAGS%
+
+&#37;LOGIN%
+
+&#37;ID%
+
+&#37;MODIFIED%
+
+&#37;MODIFIEDBY%
+
++++Formatting+
+--- on own line hr
+
+&#95;italics_ _italics_
+
+&#42;bold* *bold*
+
+&#61;fixed= =fixed=
+
+2 or more spaces any text pre
+
+&#43;word until next \n\n paragraph
+
++{1,5}text+ headings  +++headin&#43; (shows up in TOC)
+
++++Lists+
+2 or more spaces * bullet list
+
+2 or more spaces ** bullet sublist
+
+2 or more spaces 1 numbered list
+
+2 or more spaces 11 numbered sublist
+  * bullet
+  1 numbered
+ended by a blank line or line without 2 leading spaces. consecutive lines with leading spaces may omit the list char and will be treated as the most recent list char.
+
++++Tables+
+
+&#124;&#124;&#124; table row
+
+|+table header
+
+|-colspan
+
+|^rowspan
+
+
+2 or more spaces on both sides of a table cell gives it center alignment
+
+2 or more spaces on the left side results in right alignment

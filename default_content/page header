@@ -1,0 +1,4 @@
+?tags: wiki:header wiki:hide
+<h1>%NAME%</h1>
+<span class=tags>tags: %TAGS%</span><br><br>
+

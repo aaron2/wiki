@@ -1,0 +1,52 @@
+?tags: wiki:home
+<table><tr><th>
+Recently modified pages
+</th>
+<th>
+Recently created pages
+</th></tr>
+<tr>
+<td>
+%tcl{
+sql {select id,name from pages where modified>created order by modified desc limit 5} {
+puts "[link node:$id $name]<br>"
+}
+}%
+</td>
+<td>
+%tcl{
+sql {select id,name from pages order by created desc limit 5} {
+puts "[link node:$id $name]<br>"
+}
+}%
+</td>
+</tr></table>
+
+wiki:(searchembed)
+
++++Favorites+
+%tcl{
+sql {select pages.id,pages.name from pages,tags where tags.name='favorite' and tags.node=pages.id order by pages.name desc} {
+puts "[link node:${pages.id} ${pages.name}]<br>"
+}
+}%
+
++++Top tags+
+%tcl{
+sql {select name,count(name) from tags where name not like 'wiki:%' group by name order by count(name) desc limit 5} {
+puts "[link tag:$name $name]<br>"
+}
+}%
+
++++External+
+(del.ici.ous):http://del.icio.us/
+
+(gcal):http://calendar.google.com
+
+(flickr):http://www.flickr.com/
+
+(facebook):http://www.facebook.com
+
+(RTM):http://www.rememberthemilk.com/
+
+(twitter):http://www.twitter.com/home

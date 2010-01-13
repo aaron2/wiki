@@ -1,0 +1,50 @@
+?tags: wiki:meta wiki:hide
+
+<center>
+<table width=75%>
+<tr>
+<td align=center valign=top width=50% style="border: 0px;"> *Search* <br>wiki:(searchembed)</td>
+<td align=center style="border: 0px;"> *Or Browse*
+
+<a href="./wiki:recent">Recent Changes</a>
+
+<a href="./wiki:nodes">Node list</a>
+
+<a href="./wiki:tags">Tag list</a>
+
+<a href="./wiki:files">File list</a>
+</td>
+</tr>
+</table>
+</center>
+
+
+<center>
+<table width=75%>
+<tr><td colspan=2 align=center style="border: 0px;"> *Create* </td></tr>
+<tr>
+<td width=50% align=center style="border: 0px;"><a href="./wiki:new">Create a new page</a></td>
+<td align=center style="border: 0px;"><a href="./wiki:upload">Upload a file</a></td>
+</tr>
+</table>
+</center>
+
+
+<center>
+<table width=75%>
+<tr><td colspan=3 align=center style="border: 0px;"> *Configure* </td></tr>
+<tr>
+<td align=center width=33% style="border: 0px;"><a href="./wiki:prefs">Personal Preferences</a></td>
+<td align=center width=34% style="border: 0px;"><a href="./wiki:users">Users</a></td>
+<td align=center style="border: 0px;"><a href="./wiki:config">Wiki Configuration</a></td>
+</tr>
+</table>
+</center>
+
+
+<h3>Special pages</h3>
+%tcl{
+sql {select distinct pages.id as id,pages.name as name from pages,tags where tags.name like 'wiki:%' and tags.node=pages.id order by lower(pages.name)} {
+puts "[link node:$id $name]<br>"
+}
+}%

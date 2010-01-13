@@ -1,0 +1,7 @@
+?tags: wiki:footer wiki:hide
+<!--<div id=searchd width=99% style="display: none; padding-top 5px; margin-bottom: -15px; margin-top: 20px; border-right: 5px solid #E0E0E2; border-top: 5px solid #E0E0E2; border-left: 5px solid #E0E0E2;"><form name=search method=post action=http://crack.lighter.net/wiki/search><input id=searchi name=string style="margin-left: 5px;"> <input type=submit value=Search></form>
+</div>-->
+<div class=footer>
+<a href=%PATH%>home</a><!--<a href="javascript:search();">search</a>--><a href=%PATH%edit:%ID%>edit</a><a href=%PATH%history:%ID%>history</a><a href=%PATH%links:%ID%>links</a><a href=%PATH%wiki:meta>meta</a><a href=%PATH%wiki:new>new</a><a href=%PATH%wiki:upload>upload</a>
+<span id=updated>updated %MODIFIED%</span>
+</div>

@@ -1,0 +1,6 @@
+?tags: wiki:hide
+
+%tcl{
+sql {select id,name from pages where id not in (select target from links where type='node')} { puts "[link node:$id $name]<br>" }
+
+}%
