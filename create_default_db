@@ -1,0 +1,31 @@
+file delete wiki.db
+
+set argv none
+source initialize_db
+wiki
+source wiki.cgi
+
+if {[db onecolumn {select count(id) from nodes}] > 0} { error }
+
+set request(USER_LEVEL) 30
+settings
+set settings(FILTER_HTML) 0
+
+proc add_file {file} {
+    set fh [open $file r]
+    set content [read $fh]
+    close $fh
+
+    db eval {insert into nodes (name,content,protect) values($file,$content,20)}
+    set id [db last_insert_rowid]
+    set parsed [parse_static $id $content]
+
+    db eval {update nodes set parsed=$parsed,modified=datetime('now'),created=datetime('now') where id=$id}
+    fts eval {insert into search (id,name,protect,content) values($id,$input(name),$input(protect),$strip)}
+}
+
+cd default
+foreach file [lsort [glob *]] {
+    #puts "add $file"
+    add_file $file
+}
