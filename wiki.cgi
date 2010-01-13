@@ -1923,9 +1923,8 @@ proc subst_commands {id var} {
             tcl {
                 interp invokehidden $i db eval "select id,name,tf(modified) as modified,tf(created) as created,modified_by from pages where id='$id'" {}
                 if {[catch {interp eval $i [string range $data [lindex $contents_i 0] [lindex $contents_i 1]]} err]} {
-                    set output "<i>error in script</i>\n<!--\n$::errorInfo\n-->\n"
-                }
-                if {$::settings(FILTER_HTML)} {
+                    set output "<i>error in script</i>\n<!--\n[filter_html $::errorInfo]\n-->\n"
+                } elseif {$::settings(FILTER_HTML)} {
                     set output [filter_white_html $output]
                 }
             }
@@ -2008,6 +2007,7 @@ proc filter_html {data} {
 
 proc filter_white_html {data} {
     set white $::settings(HTML_WHITELIST)
+    set data [string map {[ \\[ \\ \\\\} $data]
     return [subst -novariables [regsub -all {<[[:space:]/]*([^[:space:]>]*)>?} $data {[filter2_html {\0} {\1}]}]]
 }
 
