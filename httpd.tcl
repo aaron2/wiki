@@ -283,6 +283,9 @@ proc httpd::usage {err} {
 # this will build the auto load index first, otherwise we cant import [read] later
 namespace import httpd::*
 
+# without this our real socket open fails on windows
+close [socket -server wtf 8081]
+
 namespace eval httpd {
     variable state
     array set config [list port 8080 local_only 1]
