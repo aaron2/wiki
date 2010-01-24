@@ -6,7 +6,7 @@ function selectRow(e) {
   var n = $(e.target).closest("tr");
 
   var level = $(n).find("td:eq(7)").text();
-  if (userlevel < levels[level]) { return false; }
+  if (!isadmin && level == 'Admin') { return false; }
 
   $(n).addClass("selected_row");
   $(n).find("td:first").html("<a href=# id=edit>edit</a><br><br><a href=# id=delete>delete</a>");
@@ -30,8 +30,8 @@ function editUser(e) {
 
   var level = $(row).find("td:eq(7)");
   t[7] = $(level).text();
-  var html = "<select name=level><option value=0>Blocked</option><option value=10>Read-only</option><option value=20>Normal</option><option value=25>Privileged</option>";
-  if (userlevel >= 30) { html += "<option value=30>Admin</option>"; }
+  var html = "<select name=level><option value=blocked>Blocked</option><option value=read-only>Read-only</option><option value=normal>Normal</option><option value=privileged>Privileged</option>";
+  if (isadmin) { html += "<option value=admin>Admin</option>"; }
   html += "</select>";
   $(level).html(html);
   $(level).find("option:contains("+t[7]+")").attr("selected", true);
@@ -68,12 +68,12 @@ function deleteUser(e) {
   }
   $("form > input[name='user']").attr("value", user);
   $("form > input[name='action']").attr("value", "delete");
-  jQuery.post("http://crack.lighter.net/wiki/users", $("form").serialize(), deleteUserComplete, "json");
+  jQuery.post("users", $("form").serialize(), deleteUserComplete, "json");
   return false;
 }
 
 function saveEdit(e) {
-  jQuery.post("http://crack.lighter.net/wiki/users", $("form").serialize(), saveEditComplete, "html");
+  jQuery.post("users", $("form").serialize(), saveEditComplete, "html");
   return false;
 }
 
@@ -103,11 +103,11 @@ function newUser() {
     <td><input type=text name=email></td> \
     <td></td> \
     <td><select name=level> \
-      <option value=0>Blocked</option> \
-      <option value=10>Read-only</option> \
-      <option value=20 selected>Normal</option> \
-      <option value=25>Privileged</option> \
-      <option value=30>Admin</option> \
+      <option value=blocked>Blocked</option> \
+      <option value=read-only>Read-only</option> \
+      <option value=normal selected>Normal</option> \
+      <option value=privileged>Privileged</option> \
+      <option value=admin>Admin</option> \
     </td></tr>";
 
   var o = $("#list > .selected_row");
@@ -131,7 +131,6 @@ function newUser() {
 
 var t = new Array();
 var names = new Array('host','password','name','email','','level');
-var levels = { Blocked : 0, Base : 15, Edit : 20, Privileged : 25, Admin : 30 };
-var userlevel = $("form > input[name='userlevel']").attr("value");
+var isadmin = $("form > input[name='isadmin']").attr("value");
 $("#list").bind("click", selectRow);
 $("#new").bind("click", newUser);

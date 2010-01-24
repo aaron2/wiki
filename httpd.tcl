@@ -96,10 +96,13 @@ proc httpd::set_env {s addr req} {
 
 proc httpd::request {s addr req} {
     set_env $s $addr $req
-    if {[string match */files/* [dict get $req uri]] || [string match */include/* [dict get $req uri]]} {
+
+    set uri [dict get $req uri]
+    if {[string match */favicon.ico $uri] || [string match */files/* $uri] || [string match */include/* $uri]} {
         reply_file $s $addr $req
         return
     }
+
     if {[catch {service_request} out]} {
         if {$out != "exit"} {
             logger "ERROR: $out"

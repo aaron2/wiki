@@ -5,8 +5,8 @@ catch {file delete fts.db}
 sqlite3 wiki wiki.db
 sqlite3 fts fts.db
 
-#fts eval {create virtual table search using fts3('id','name','protect','content')}
-fts eval {create virtual table search using fts3('id','name','protect','content', tokenize porter)}
+#fts eval {create virtual table search using fts3('id','name','level','content')}
+fts eval {create virtual table search using fts3('id','name','level','content', tokenize porter)}
 
 proc striphtml {data} {
     regsub -all {<[^>]*?>} $data { } data
@@ -17,7 +17,7 @@ proc striphtml {data} {
     return $data
 }
 
-wiki eval {select id,name,protect,parsed from nodes} {
+wiki eval {select id,name,level,parsed from nodes} {
     set content "$name [striphtml $parsed]"
-    fts eval {insert into search (id,name,protect,content) values($id,$name,$protect,$content)}
+    fts eval {insert into search (id,name,level,content) values($id,$name,$level,$content)}
 }

@@ -27,7 +27,7 @@ proc userlist {} {
         <form action=\"users\" method=post>
         <input type=hidden name=user>
         <input type=hidden name=action>
-        <input type=hidden name=userlevel value=$::request(USER_LEVEL)>
+        <input type=hidden name=isadmin value=\"[has_perm $::request(USER_LEVEL) ua]\">
         <table class=wikilist><tbody id=list>
         [th $sort {Edit 0} {User 1} {Host 0} {Password 0} {Name 0} {Email 0} {Created 1} {Level 1}]"
     db eval "select * from users order by $order limit $perpage offset $offset" {
@@ -38,10 +38,37 @@ proc userlist {} {
              <td>$name</td>
              <td>$email</td>
              <td>[format_time $created]</td>
-             <td>[string map {10 Read-only 20 Normal 25 Privileged 30 Admin 0 Blocked} $level]</td></tr>"
+             <td>[userlevel_name $level]</td></tr>"
     }
     puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a></form></td></tr></table>
         <script src=\"include/userlist.js\"></script></body></html>"
+}
+
+proc userlevel_name {{level {}}} {
+    array set map {
+        {0 {}} Blocked
+        {1 {}} Anonymous
+        {2 {}} Read-only
+        {3 {fc nc}} Normal
+        {4 {fc fd nc nd um up}} Privileged
+        {4 {fc fd nc nd ua um up wc}} Admin
+    }
+    if {$level == ""} { return [array get map] }
+    if {[info exists map($level)]} { return $map($level) }
+    return Custom
+}
+
+proc nodelevel_name {{level {}}} {
+    set map [dict create \
+        X3333 "All Read/Write" \
+        X1133 "Anon Read-only" \
+        X1113 "Everyone Read-only" \
+        X0133 Normal \
+        X0113 "User Read-only" \
+        X0003 Privileged]
+    if {$level == ""} { return $map }
+    if {[dict exists $map $level]} { return [dict get $map $level] }
+    return Custom
 }
 
 # handles the ajax post from the user list page
@@ -50,6 +77,14 @@ proc userlist {} {
 proc saveusers {} {
     get_post input
     db function password {hash_pass}
+    array set rev_map [string tolower [lreverse [userlevel_name]]]
+    if {[info exists input(level)] && [info exists rev_map($input(level))]} {
+        set input(level) $rev_map($input(level))
+    } elseif {[info exists input(level)] && [string tolower [lindex $input(level) 0]] == "custom"} {
+        set input(level) [list [lindex $input(level) 1 0] [lsort [string tolower [lindex $input(level) 1 1]]]]
+    } elseif {[info exists input(level)]} {
+        http_error 400
+    }
     switch -exact -- $input(action) {
         edit {
             if {![authorized user modify]} { no_auth }
@@ -58,8 +93,7 @@ proc saveusers {} {
                 if {![info exists input($x)]} { http_error 400 }
                 set input($x) [string trim $input($x)]
             }
-            set nlevel [string map {10 Read-only 20 Normal 25 Privileged 30 Admin 0 Blocked} $input(level)]
-
+            set nlevel [userlevel_name $input(level)]
             if {[info exists input(password)] && $input(password) != ""} {
                 db eval {update users set password=password($input(password)) where user=$input(user)}
             }
@@ -76,8 +110,9 @@ proc saveusers {} {
             if {$input(newuser) == "" || [db exists {select user from users where user=$input(newuser)}]} {
                 http_error 400
             }
+            set nlevel [userlevel_name $input(level)]
             db eval {insert into users (user,ip,password,name,email,created,level) values($input(newuser),$input(host),password($input(password)),$input(name),$input(email),datetime('now'),$input(level))}
-            set res "<td></td><td>$input(newuser)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time [db onecolumn {select created from users where user=$input(newuser)}]]</td><td>$input(level)</td>"
+            set res "<td></td><td>$input(newuser)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time [db onecolumn {select created from users where user=$input(newuser)}]]</td><td>$nlevel</td>"
         }
         delete {
             if {![authorized user delete $input(user)]} { no_auth }
@@ -105,10 +140,10 @@ proc editor {userlevel objectlevel action name content back} {
           <script src=\"include/editor.js\"></script>"
 
     if {$objectlevel != "" && $::request(USER_AUTH)} {
-        puts "<select name=protect style=\"position: absolute; right: 1em;\">"
-        foreach val {5 10 15 20 25} name [list "All Read/Write" "Anon Read-only" "Users Only" "User Read-only" Privileged] {
-            if {$val > $userlevel} { continue }
-            puts -nonewline "<option value=$val [expr {$val == $objectlevel ? " selected" : ""}]>$name</option>"
+        puts "<select name=level style=\"position: absolute; right: 1em;\">"
+        dict for {val name} [nodelevel_name] {
+            if {[string index $val [lindex $userlevel 0]] == 0} { continue }
+            puts -nonewline "<option value=$val [expr {$val eq $objectlevel ? " selected" : ""}]>$name</option>"
         }
         puts "</select>"
     } elseif {!$::request(USER_AUTH)} {
@@ -130,9 +165,9 @@ proc editnode {id args} {
         set name [lindex $args 0]
         set content [lindex $args 1]
         set back "history.go(-1)"
-        set protect $::settings(PROTECT)
+        set level $::settings(DEFAULT_LEVEL)
     } else {
-        db eval {select name,content,protect from nodes where id=$id} {}
+        db eval {select name,content,level from nodes where id=$id} {}
         if {![info exists name]} { http_error 404 "no such node" }
         if {![authorized node edit $id]} { no_auth }
         http_header
@@ -142,7 +177,7 @@ proc editnode {id args} {
         regsub "^\n" $content "\\&nbsp;\n" content
         set back "document.location='./node:$id'"
     }
-    editor $::request(USER_LEVEL) $protect $action $name $content $back
+    editor $::request(USER_LEVEL) $level $action $name $content $back
     if {!$::request(USER_AUTH) && $::settings(RECAPTCHA_PRIVATE_KEY) != ""} {
         puts "<script src=\"http://api.recaptcha.net/js/recaptcha_ajax.js\"></script>
             <script>Recaptcha.create('$::settings(RECAPTCHA_PUBLIC_KEY)', 'captcha', { theme: 'clean' });</script>"
@@ -177,9 +212,9 @@ proc editconfig {} {
           <td style=\"border: 0px solid black;\"><textarea cols=25 rows=3 name=HTML_WHITELIST>$tmpset(HTML_WHITELIST)</textarea></td></tr>
           <tr><td style=\"border: 0px solid black;\">Allow anon create</td>
           <td style=\"border: 0px solid black;\"><input type=checkbox name=ANON_CREATE [expr {$tmpset(ANON_CREATE) ? "checked" : ""}]></td></tr>
-          <tr><td style=\"border: 0px solid black;\">Default permissions</td><td style=\"border: 0px solid black;\"><select name=PROTECT>"
-    foreach val {5 10 15 20 25} name [list "All Read/Write" "Anon Read-only" "Users Only" "User Read-only" Privileged] {
-        puts -nonewline "<option value=$val [expr {$val == $tmpset(PROTECT) ? " selected" : ""}]>$name"
+          <tr><td style=\"border: 0px solid black;\">Default permissions</td><td style=\"border: 0px solid black;\"><select name=DEFAULT_LEVEL>"
+    foreach val {0 2 3 5 6} name [list "All Read/Write" "Anon Read-only" "Normal" "User Read-only" Privileged] {
+        puts -nonewline "<option value=$val [expr {$val == $tmpset(DEFAULT_LEVEL) ? " selected" : ""}]>$name"
     }
     puts "</select></td></tr>
         <tr><td style=\"border: 0px solid black;\">Login expires</td><td style=\"border: 0px solid black;\"><input type=text name=EXPIRES size=27 value=\"$tmpset(EXPIRES)\"></td></tr>
@@ -234,7 +269,7 @@ proc saveconfig {} {
     # checkboxes dont submit any data when not checked, so keep a list of them
     set checkboxes {FILTER_HTML ANON_CREATE}
     # dont trust the form just look for known valid options. this list must be kept in sync with editconfig and the db
-    foreach x {NAME TZ TF FILTER_HTML HTML_WHITELIST ANON_CREATE EXPIRES RECAPTCHA_PRIVATE_KEY RECAPTCHA_PUBLIC_KEY} {
+    foreach x {NAME DEFAULT_LEVEL TZ TF FILTER_HTML HTML_WHITELIST ANON_CREATE EXPIRES RECAPTCHA_PRIVATE_KEY RECAPTCHA_PUBLIC_KEY} {
         if {[info exists input($x)]} {
             if {$x == "TZ" && [catch {clock format [clock seconds] -timezone $input($x)} err]} {
                 lappend status "Invalid timezone"
@@ -265,12 +300,12 @@ proc saveconfig {} {
 # input: the name of the tz which should be selected in the list
 # returns: html
 proc tzselect {sel} {
-    set ignore {US Antarctica Eire PRC Libya Kwajalein ROC ROK GB GB-Eire NZ NZ-CHAT CET CST6CDT Etc EET EST EST5EDT GMT GMT+0 GMT-0 GMT0 Greenwich HST MET MST MST7MDT PST8PDT SystemV UCT UTC Universal W-SU WET Zulu}
+    set ignore {US Antarctica Eire PRC Libya Kwajalein ROC ROK GB GB-Eire NZ NZ-CHAT CET CST6CDT Etc EET EST EST5EDT GMT GMT+0 GMT-0 GMT0 Greenwich HST MET MST MST7MDT PST8PDT SystemV UCT Universal W-SU WET Zulu}
     set out [list "<select name=TZ>"]
-    foreach x [lsort [glob -nocomplain -tails -dir /usr/local/lib/tcl8.5/tzdata/ *]] {
+    foreach x [lsort [glob -nocomplain -tails -dir $::tcl_library/tzdata/ *]] {
         if {[lsearch -exact $ignore $x] > -1} continue
-        if {[file isdirectory /usr/local/lib/tcl8.5/tzdata/$x]} {
-            foreach y [lsort [glob -nocomplain -tails -dir /usr/local/lib/tcl8.5/tzdata/$x *]] {
+        if {[file isdirectory $::tcl_library/tzdata/$x]} {
+            foreach y [lsort [glob -nocomplain -tails -dir $::tcl_library/tzdata/$x *]] {
                 set opt "<option value=\"$x/$y\""
                 if {"$x/$y" == $sel} { append opt " selected" }
                 append opt ">$x/$y"
@@ -283,7 +318,7 @@ proc tzselect {sel} {
             lappend out $opt
         }
     }
-    if {[llength $out] == 1} { puts "<option value=UTC>UTC" }
+    if {[llength $out] == 1} { lappend out "<option value=UTC>UTC" }
     lappend out "</select>"
     return [join $out \n]
 }
@@ -568,7 +603,7 @@ proc diff {lines1 lines2} {
 proc authenticate {} {
     global cookies request
     if {$request(REMOTE_ADDR) == "127.0.0.1"} {
-        array set request {USER_AUTH 1 USER localhost USER_LEVEL 30}
+        array set request [list USER_AUTH 1 USER localhost USER_LEVEL {4 {fc fd nc nd ua um up wc}}]
         return
     }
     if {[info exists cookies(AUTH)]} {
@@ -580,10 +615,10 @@ proc authenticate {} {
     if {![info exists user]} {
         # expire an invalid auth cookie if it exists
         if {[info exists cookies(AUTH)]} { set_cookie AUTH "" "5 days ago" }
-        set request(USER_AUTH) 0
-        set request(USER) anonymous
-        set user anonymous
-        set level 5
+        array set request [list USER_AUTH 0 USER anonymous]
+        set perms {}
+        if {$::settings(ANON_CREATE)} { lappend perms nc }
+        set level [list 1 $perms]
     } else {
         set request(USER_AUTH) 1
         set request(USER) $user
@@ -595,61 +630,63 @@ proc authenticate {} {
            # otherwise we will only lower the level
            if {$huser == $user} {
                set level $hlev; break
-           } elseif {$hlev < $level} {
-               set level $hlev; break
+           } else {
+               set perms [expr {[lindex $hlev 0] < [lindex $level 0] ? [lindex $hlev 0] : [lindex $level 0]}]
+               set flags {}
+               foreach x [lindex $level 1] {
+                   if {[lsearch -exact [lindex $hlev 1] $x] >= 0]} { lappend flags $x }
+               }
+               set level [list $perms $flags]
            }
         }
     }
-    if {$level < 5} { http_error 403 Forbidden }
+    if {[lindex $level 0] < 1} { http_error 403 Forbidden }
     set request(USER_LEVEL) $level
 }
 
+proc has_perm {level perm} {
+    return [expr {[lsearch -exact -sorted [lindex $level 1] $perm] > -1}]
+}
+
 proc authorized {entity action {target {}}} {
-    set reqlevel 30
+    set level $::request(USER_LEVEL)
+    set user_type [lindex $level 0]
     switch -glob -- $entity:$action {
-        wiki:config { set reqlevel 30 }
+        wiki:config { return [has_perm $level wc] }
         user:password {
-            if {$::request(USER) != $target} {
-                set reqlevel 25
-                set tlev [db onecolumn {select level from users where user=$target}]
-                if {$tlev != "" && $tlev >= 30} { set reqlevel 30 }
-            } else {
-                set reqlevel 10
-            }
+            if {$::request(USER) == $target} { return 1 }
+            set tlev [db onecolumn {select level from users where user=$target}]
+            # if target user is admin level then requestor must be admin also
+            if {[has_perm $tlev ua] && ![has_perm $level ua]} { return 0 }
+            if {[has_perm $level up]} { return 1 }
+            return 0
         }
         user:* {
-            set reqlevel 25
             # if target user is admin level then requestor must be admin also
             if {$target != ""} {
                 set tlev [db onecolumn {select level from users where user=$target}]
-                if {$tlev != "" && $tlev >= 30} { set reqlevel 30 }
+                if {[has_perm $tlev ua] && ![has_perm $level ua]} { return 0 }
             }
+            return [has_perm $level um]
         }
-        *:delete { set reqlevel 25 }
-        node:wikitag { set reqlevel 25 }
+        file:delete { return [has_perm $level fd] }
+        file:create { return [has_perm $level fc] }
+        node:create { return [has_perm $level nc] }
+        node:delete { return [has_perm $level nd] }
+        node:wikitag { return [has_perm $level wc] }
         node:edit {
-            set reqlevel [db onecolumn {select protect from nodes where id=$target}]
+            return [db onecolum {select substr(level,$user_type+1,1)>=3 from nodes where id=$target}]
+        }
+        node:append {
+            return [db onecolum {select substr(level,$user_type+1,1)>=2 from nodes where id=$target}]
         }
         node:view {
-            if {$target == ""} {
-                # if target is empty, return the highest node level the user may view
-                return [expr {$::request(USER_LEVEL) + 5}]
-            }
-            set reqlevel [db onecolumn {select protect from nodes where id=$target}]
-            if {$reqlevel == ""} {
-                # nonexistent or deleted node
-                set reqlevel 25
-            } elseif {$reqlevel < 20 && $reqlevel >= 10} {
-                # nodes protect level is for editing, for viewing lower it by 5 unless its privileged
-                incr reqlevel -5
-            }
-        }
-        *:create {
-            set reqlevel 10
-            if {$::settings(ANON_CREATE) > 0} { set reqlevel 5 }
+            set perm [db onecolum {select substr(level,$user_type+1,1)>=1 from nodes where id=$target}]
+            if {$perm == ""} { return [has_perm $level nd] }
+            return $perm
         }
     }
-    return [expr {$::request(USER_LEVEL) >= $reqlevel}]
+    return 0
 }
 
 # perform exact, glob, or cidr style comparison of ip addresses
@@ -827,7 +864,6 @@ proc do_search {{q {}}} {
         return
     }
 
-    set level [authorized node view]
     set matches {}
 
     # for tag searches need to remove boolean operators and negated terms to avoid suprious results,
@@ -841,8 +877,9 @@ proc do_search {{q {}}} {
 
     set results ""
     set term [string map {\" &quot;} [filter_html $input(string)]]
+    set level_idx [lindex $::request(USER_LEVEL) 0]
     append results "<h3>Tag results</h3>"
-    db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and nodes.protect<=$level group by tags.node order by count(tags.name) desc" {
+    db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and substr(nodes.level,$level_idx+1,1)>=1 group by tags.node order by count(tags.name) desc" {
         if {$numterms == $count(tags.name)} { lappend matches $id }
         append results "[link node:$node $name]&nbsp;&nbsp;&nbsp;<span class=tags>("
         db eval {select name from tags where node=$id} {
@@ -852,8 +889,7 @@ proc do_search {{q {}}} {
     }
 
     append results "<br><h3>Full text results</h3>"
-    fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and protect<=$level} {
-
+    fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and substr(level,$level_idx+1,1)>=1} {
         append results "[link node:$id $name]"
         if {[set tags [db eval {select name from tags where node=$id}]] != ""} {
             append results "&nbsp;&nbsp;&nbsp;<span class=tags>( "
@@ -892,11 +928,11 @@ proc do_search {{q {}}} {
 # input: an exact tag name
 # returns: nothing
 proc showtag {tag} {
-    set level [authorized node view]
     http_header
     html_head "Pages tagged with $tag"
     puts "<h1>Pages tagged with &quot;$tag&quot;</h1><br>"
-    db eval {select nodes.id,nodes.name from nodes,tags where nodes.protect<=$level and tags.name=$tag and tags.node=nodes.id} {
+    set level_idx [lindex $::request(USER_LEVEL) 0]
+    db eval {select nodes.id,nodes.name from nodes,tags where substr(nodes.level,$level_idx+1,1)>=1 and tags.name=$tag and tags.node=nodes.id} {
         puts "[link node:$id $name]<br>"
     }
 }
@@ -914,7 +950,7 @@ proc showhistory {nodeid} {
         } elseif {[llength $nodeid] == 3} {
             eval showdiff $nodeid
         } else {
-            http_error 500 "invalid arguments"
+            http_error 400 "invalid arguments"
         }
         return
     }
@@ -1127,14 +1163,14 @@ proc wikitag {name} {
 
 proc taglist {} {
     get_input a
-    set level [authorized node view]
     http_header
     html_head "Tag list"
     if {[info exists a(sort)]} { set sort $a(sort) }
     sortable sort order {tag links} {"tags.name" "c desc"}
 
     puts "<h1>Tag list</h1><br><table class=wikilist>[th $sort {Tag 1} {Links 1}]"
-    db eval "select tags.name as name,count(tags.node) as c from tags,nodes where nodes.protect<=$level and tags.node=nodes.id and tags.name not like 'wiki:%' group by tags.name order by $order" {
+    set level_idx [lindex $::request(USER_LEVEL) 0]
+    db eval "select tags.name as name,count(tags.node) as c from tags,nodes where substr(nodes.level,$level_idx+1,1)>=1 and tags.node=nodes.id and tags.name not like 'wiki:%' group by tags.name order by $order" {
         puts "<td>[link tag:$name $name]<td align=center>$c</td></tr>"
     }
     puts "</tr></table>"
@@ -1197,21 +1233,20 @@ proc pagination {input per link total} {
 }
 
 proc nodelist {} {
-    set level [authorized node view]
     get_input a
     http_header
     html_head "Node list"
 
-    set perm { 10 R/O 15 User 20 "User R/O" 25 Priv 5 R/W }
     if {[info exists a(sort)]} { set sort $a(sort) }
-    sortable sort order {name created modified perms} {"lower(name)" "created desc" "modified desc" protect}
+    sortable sort order {name created modified perms} {"lower(name)" "created desc" "modified desc" level}
     pagination a 200 wiki:nodes [db onecolumn {select count(id) from nodes}]
+    set level_idx [lindex $::request(USER_LEVEL) 0]
 
     puts "<h1>Node list</h1><br><br>
          <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
          <table class=wikilist>[th $sort {Name 1} {Created 1} {Modified 1} {Perms 1} {Links 0} {Tags 0}]"
-    db eval "select id,name,created,modified,protect from nodes where protect<=$level and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset $offset" {
-        puts "<tr><td>[link node:$id $name]</td><td>[format_time $created]</td><td>[format_time $modified]</td><td align=center>[string map $perm $protect]</td>"
+    db eval "select id,name,created,modified,level from nodes where substr(level,$level_idx+1,1)>=1 and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset $offset" {
+        puts "<tr><td>[link node:$id $name]</td><td>[format_time $created]</td><td>[format_time $modified]</td><td align=center>[nodelevel_name $level]</td>"
         puts "<td align=center>[link links:$id [db eval {select count(node) from links where target=$id and type='node'}]]</td><td>"
         db eval {select name from tags where node=$id} {
             puts "[link tag:$name $name] "
@@ -1497,8 +1532,8 @@ proc state_changed {s new c b} {
 proc parse_blocks {id blocks} {
     set output ""
     foreach {type block} $blocks {
-        #puts $type
-        #puts $block
+        #puts \"$type\"
+        #puts \"$block\"
         #continue
         set block [join $block \n]
         switch -exact -- $type {
@@ -1887,18 +1922,19 @@ proc db_auth {action table col db view} {
 
 proc setup_interp {} {
     set i [interp create]
-    set level [authorized node view]
     interp alias $i file {} filewrapper
     interp alias $i sql {} interp invokehidden $i db eval
     interp alias $i puts {} append output
-    foreach x {link format_filesize get_input filter_html unescape format_time db_auth} {
+    foreach x {link format_filesize get_input strip_html filter_html unescape format_time db_auth table} {
         interp alias $i $x {} $x
     }
+    set level_idx [lindex $::request(USER_LEVEL) 0]
     interp eval $i "
-        load /usr/local/lib/sqlite3.6.17/libsqlite3.6.17.so Sqlite3
+        #auto_load_index
+        eval load [lsearch -exact -index 1 -inline [info loaded] Sqlite3]
         sqlite3 db wiki.db -readonly 1
         db function tf format_time
-        db eval \"create temp view pages as select * from nodes where protect<=$level\"
+        db eval \"create temp view pages as select * from nodes where substr(level,$level_idx+1,1)>=1\"
         db authorizer db_auth
     "
     interp eval $i [list array set request [array get ::request]]
@@ -2047,7 +2083,7 @@ proc verify_captcha {var} {
 proc savepage {id} {
     get_post input
     if {$id != "new"} {
-        db eval {select content,protect,strftime('%s',modified) as modified from nodes where id=$id} {}
+        db eval {select content,level,strftime('%s',modified) as modified from nodes where id=$id} {}
         if {![info exists content]} { http_error 404 "no such node" }
         if {![authorized node [expr {$input(content) == "delete" ? "delete" : "edit"}] $id]} { no_auth }
         if {$input(editstarted) < $modified} {
@@ -2056,12 +2092,12 @@ proc savepage {id} {
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
-        if {![info exists input(protect)] || ![string is integer -strict $input(protect)] || $input(protect) > $::request(USER_LEVEL)} { set input(protect) $protect }
+        if {![info exists input(level)] || ![string match {X[0123]???} $input(level)]} { set input(level) $level }
         if {$input(content) == $content} {
-            db eval {update nodes set name=$input(name),protect=$input(protect) where id=$id}
+            db eval {update nodes set name=$input(name),level=$input(level) where id=$id}
             db eval {commit transaction}
             set strip "$input(name) [striphtml [db onecolumn {select parsed from nodes where id=$id}]]"
-            fts eval {update search set name=$input(name),protect=$input(protect),content=$strip where id=$id}
+            fts eval {update search set name=$input(name),level=$input(level),content=$strip where id=$id}
             location node:$id
             return
         }
@@ -2081,8 +2117,8 @@ proc savepage {id} {
     } else {
         if {![authorized node create]} { no_auth }
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
-        if {![string is integer -strict $input(protect)] || $input(protect) > $::request(USER_LEVEL)} { set input(protect) $::request(USER_LEVEL) }
-        db eval {insert into nodes (name,content,protect) values($input(name),$input(content),$input(protect))}
+        if {![info exists input(level)] || ![string match {X[0123]???} $input(level)]} { set input(level) $::settings(DEFAULT_LEVEL) }
+        db eval {insert into nodes (name,content,level) values($input(name),$input(content),$input(level))}
         set id [db last_insert_rowid]
         set new 1
     }
@@ -2098,10 +2134,10 @@ proc savepage {id} {
 
     if {$new} {
         db eval {update nodes set parsed=$parsed,modified=datetime('now'),created=datetime('now'),modified_by=$user where id=$id}
-        fts eval {insert into search (id,name,protect,content) values($id,$input(name),$input(protect),$strip)}
+        fts eval {insert into search (id,name,level,content) values($id,$input(name),$input(level),$strip)}
     } else {
-        db eval {update nodes set name=$input(name),content=$input(content),parsed=$parsed,modified=datetime('now'),modified_by=$user,protect=$input(protect) where id=$id}
-        fts eval {update search set name=$input(name),protect=$input(protect),content=$strip where id=$id}
+        db eval {update nodes set name=$input(name),content=$input(content),parsed=$parsed,modified=datetime('now'),modified_by=$user,level=$input(level) where id=$id}
+        fts eval {update search set name=$input(name),level=$input(level),content=$strip where id=$id}
     }
     db eval {commit transaction}
     location node:$id
@@ -2142,7 +2178,8 @@ proc showlinks {id} {
     http_header
     html_head "Pages linking to $name"
     puts "<h1>Links to &quot;$name&quot;</h1><br>"
-    db eval {select nodes.id as link,nodes.name from nodes,links where links.type='node' and links.target=$id and links.node=nodes.id} {
+    set level_idx [lindex $::request(USER_LEVEL) 0]
+    db eval {select nodes.id as link,nodes.name from nodes,links where links.type='node' and links.target=$id and links.node=nodes.id and substr(nodes.level,$level_idx+1,1)>=1} {
         puts "[link node:$link $name]<br>"
     }
     if {![info exists link]} {
@@ -2151,8 +2188,8 @@ proc showlinks {id} {
 }
 
 proc open_databases {} {
-    #package require sqlite3
-    load /usr/local/lib/sqlite3.6.17/libsqlite3.6.17.so Sqlite3
+    package require sqlite3
+    #load /usr/local/lib/teapot/package/linux-glibc2.3-ix86/lib/sqlite33.6.18/libsqlite3.6.18.so Sqlite3
     #set dir [file dirname [pwd]]
     set dir [pwd]
     sqlite3 db [file join $dir wiki.db]
@@ -2172,8 +2209,8 @@ proc settings {} {
 
 proc service_request {} {
     get_cookies
-    authenticate
     settings
+    authenticate
     #parray request
 
     #set doc [split [string range $::request(PATH_TRANSLATED) [string length [file dirname [info script]]/] end] :]

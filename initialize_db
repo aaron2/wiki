@@ -1,5 +1,3 @@
-# creates an empty wiki.db and/or fts.db
-
 package require sqlite3
 
 proc wiki {} {
@@ -20,7 +18,7 @@ proc wiki {} {
         FILTER_HTML 1
         HTML_WHITELIST "a b br center dd div dt h1 h2 h3 h4 h5 hr i img li ol p pre span strike table td th tr u ul"
         ANON_CREATE 1
-        PROTECT 5
+        DEFAULT_LEVEL X0133
         EXPIRES "7 days"
         RECAPTCHA_PRIVATE_KEY ""
         RECAPTCHA_PUBLIC_KEY ""
@@ -31,12 +29,12 @@ proc wiki {} {
     }
     
     # pass is password
-    new eval {insert into users (user,password,created,level) values('admin','5F4DCC3B5AA765D61D8327DEB882CF99',datetime('now'),30)}
+    new eval {insert into users (user,password,created,level) values('admin','5F4DCC3B5AA765D61D8327DEB882CF99',datetime('now'),'4 {fc fd nc nd ua um up wc}')}
     
     #if {![new exists {select node from tags where name='wiki:home'}]} {
     #    set name Home
     #    set content "Welcome to your new wiki!"
-    #    new eval {insert into nodes (name,content,parsed,protect,modified,created) values($name,$content,$content,0,datetime('now'),datetime('now'))}
+    #    new eval {insert into nodes (name,content,parsed,level,modified,created) values($name,$content,$content,0,datetime('now'),datetime('now'))}
     #    set home [new last_insert_rowid]
     #    new eval {insert into tags (name,node) values('wiki:home',$home)}
     #}
@@ -50,8 +48,7 @@ proc fts {} {
         puts "rebuilt fts.db from wiki.db"
     } elseif {![file exists fts.db]} {
         sqlite3 fts fts.db
-        fts eval {create virtual table search use fts3('id','name','protect','content', tokenize porter)}
-        puts "created empty fts.db"
+        fts eval {create virtual table search using fts3('id','name','level','content', tokenize porter)}
     }
 }
 
