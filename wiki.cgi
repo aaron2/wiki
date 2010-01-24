@@ -1931,7 +1931,7 @@ proc setup_interp {} {
     set level_idx [lindex $::request(USER_LEVEL) 0]
     interp eval $i "
         #auto_load_index
-        eval load [lsearch -exact -index 1 -inline [info loaded] Sqlite3]
+        load \"[lindex [lsearch -exact -index 1 -inline [info loaded] Sqlite3] 0]\"
         sqlite3 db wiki.db -readonly 1
         db function tf format_time
         db eval \"create temp view pages as select * from nodes where substr(level,$level_idx+1,1)>=1\"
