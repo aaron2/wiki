@@ -17,16 +17,16 @@ proc add_file {file} {
     set content [read $fh]
     close $fh
 
-    db eval {insert into nodes (name,content,level) values($file,$content,'X0113')}
+    db eval {insert into nodes (name,content,level) values($file,$content,'00113')}
     set id [db last_insert_rowid]
     set parsed [parse_static $id $content]
     set strip "$file [striphtml $parsed]"
 
     db eval {update nodes set parsed=$parsed,modified=datetime('now'),created=datetime('now') where id=$id}
-    fts eval {insert into search (id,name,level,content) values($id,$file,'X0113',$strip)}
+    fts eval {insert into search (id,name,level,content) values($id,$file,'00113',$strip)}
 }
 
-cd default
+cd default_content
 foreach file [lsort [glob *]] {
     #puts "add $file"
     add_file $file

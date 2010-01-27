@@ -18,7 +18,7 @@ proc wiki {} {
         FILTER_HTML 1
         HTML_WHITELIST "a b br center dd div dt h1 h2 h3 h4 h5 hr i img li ol p pre span strike table td th tr u ul"
         ANON_CREATE 1
-        DEFAULT_LEVEL X0133
+        DEFAULT_LEVEL 00133
         EXPIRES "7 days"
         RECAPTCHA_PRIVATE_KEY ""
         RECAPTCHA_PUBLIC_KEY ""
@@ -44,7 +44,7 @@ proc wiki {} {
 
 proc fts {} {
     if {[file exists wiki.db] && [file exists rebuild_ft_index]} {
-        exec rebuild_ft_index
+        source rebuild_ft_index
         puts "rebuilt fts.db from wiki.db"
     } elseif {![file exists fts.db]} {
         sqlite3 fts fts.db

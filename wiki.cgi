@@ -60,12 +60,12 @@ proc userlevel_name {{level {}}} {
 
 proc nodelevel_name {{level {}}} {
     set map [dict create \
-        X3333 "All Read/Write" \
-        X1133 "Anon Read-only" \
-        X1113 "Everyone Read-only" \
-        X0133 Normal \
-        X0113 "User Read-only" \
-        X0003 Privileged]
+        03333 "All Read/Write" \
+        01133 "Anon Read-only" \
+        01113 "Everyone Read-only" \
+        00133 Normal \
+        00113 "User Read-only" \
+        00003 Privileged]
     if {$level == ""} { return $map }
     if {[dict exists $map $level]} { return [dict get $map $level] }
     return Custom
@@ -675,15 +675,15 @@ proc authorized {entity action {target {}}} {
         node:delete { return [has_perm $level nd] }
         node:wikitag { return [has_perm $level wc] }
         node:edit {
-            return [db onecolum {select substr(level,$user_type+1,1)>=3 from nodes where id=$target}]
+            return [db onecolum {select substr(level,$user_type+1,1)>='3' from nodes where id=$target}]
         }
         node:append {
-            return [db onecolum {select substr(level,$user_type+1,1)>=2 from nodes where id=$target}]
+            return [db onecolum {select substr(level,$user_type+1,1)>='2' from nodes where id=$target}]
         }
         node:view {
-            set perm [db onecolum {select substr(level,$user_type+1,1)>=1 from nodes where id=$target}]
+            set perm [db onecolum {select substr(level,$user_type+1,1)>='1' from nodes where id=$target}]
             if {$perm == ""} { return [has_perm $level nd] }
-            return $perm
+            return $perm 
         }
     }
     return 0
@@ -879,7 +879,7 @@ proc do_search {{q {}}} {
     set term [string map {\" &quot;} [filter_html $input(string)]]
     set level_idx [lindex $::request(USER_LEVEL) 0]
     append results "<h3>Tag results</h3>"
-    db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and substr(nodes.level,$level_idx+1,1)>=1 group by tags.node order by count(tags.name) desc" {
+    db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and substr(nodes.level,$level_idx+1,1)>='1' group by tags.node order by count(tags.name) desc" {
         if {$numterms == $count(tags.name)} { lappend matches $id }
         append results "[link node:$node $name]&nbsp;&nbsp;&nbsp;<span class=tags>("
         db eval {select name from tags where node=$id} {
@@ -889,7 +889,7 @@ proc do_search {{q {}}} {
     }
 
     append results "<br><h3>Full text results</h3>"
-    fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and substr(level,$level_idx+1,1)>=1} {
+    fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and substr(level,$level_idx+1,1)>='1'} {
         append results "[link node:$id $name]"
         if {[set tags [db eval {select name from tags where node=$id}]] != ""} {
             append results "&nbsp;&nbsp;&nbsp;<span class=tags>( "
@@ -932,7 +932,7 @@ proc showtag {tag} {
     html_head "Pages tagged with $tag"
     puts "<h1>Pages tagged with &quot;$tag&quot;</h1><br>"
     set level_idx [lindex $::request(USER_LEVEL) 0]
-    db eval {select nodes.id,nodes.name from nodes,tags where substr(nodes.level,$level_idx+1,1)>=1 and tags.name=$tag and tags.node=nodes.id} {
+    db eval {select nodes.id,nodes.name from nodes,tags where substr(nodes.level,$level_idx+1,1)>='1' and tags.name=$tag and tags.node=nodes.id} {
         puts "[link node:$id $name]<br>"
     }
 }
@@ -1170,7 +1170,7 @@ proc taglist {} {
 
     puts "<h1>Tag list</h1><br><table class=wikilist>[th $sort {Tag 1} {Links 1}]"
     set level_idx [lindex $::request(USER_LEVEL) 0]
-    db eval "select tags.name as name,count(tags.node) as c from tags,nodes where substr(nodes.level,$level_idx+1,1)>=1 and tags.node=nodes.id and tags.name not like 'wiki:%' group by tags.name order by $order" {
+    db eval "select tags.name as name,count(tags.node) as c from tags,nodes where substr(nodes.level,$level_idx+1,1)>='1' and tags.node=nodes.id and tags.name not like 'wiki:%' group by tags.name order by $order" {
         puts "<td>[link tag:$name $name]<td align=center>$c</td></tr>"
     }
     puts "</tr></table>"
@@ -1245,7 +1245,7 @@ proc nodelist {} {
     puts "<h1>Node list</h1><br><br>
          <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
          <table class=wikilist>[th $sort {Name 1} {Created 1} {Modified 1} {Perms 1} {Links 0} {Tags 0}]"
-    db eval "select id,name,created,modified,level from nodes where substr(level,$level_idx+1,1)>=1 and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset $offset" {
+    db eval "select id,name,created,modified,level from nodes where substr(level,$level_idx+1,1)>='1' and id not in (select distinct node from tags where name='wiki:hide') order by $order limit $perpage offset $offset" {
         puts "<tr><td>[link node:$id $name]</td><td>[format_time $created]</td><td>[format_time $modified]</td><td align=center>[nodelevel_name $level]</td>"
         puts "<td align=center>[link links:$id [db eval {select count(node) from links where target=$id and type='node'}]]</td><td>"
         db eval {select name from tags where node=$id} {
@@ -1934,7 +1934,7 @@ proc setup_interp {} {
         load \"[lindex [lsearch -exact -index 1 -inline [info loaded] Sqlite3] 0]\"
         sqlite3 db wiki.db -readonly 1
         db function tf format_time
-        db eval \"create temp view pages as select * from nodes where substr(level,$level_idx+1,1)>=1\"
+        db eval \"create temp view pages as select * from nodes where substr(level,$level_idx+1,1)>='1'\"
         db authorizer db_auth
     "
     interp eval $i [list array set request [array get ::request]]
@@ -2092,7 +2092,7 @@ proc savepage {id} {
             http_error 409 "Edit conflict: modified by $modified_by at $modified"
         }
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
-        if {![info exists input(level)] || ![string match {X[0123]???} $input(level)]} { set input(level) $level }
+        if {![info exists input(level)] || ![string match {0[0123]???} $input(level)]} { set input(level) $level }
         if {$input(content) == $content} {
             db eval {update nodes set name=$input(name),level=$input(level) where id=$id}
             db eval {commit transaction}
@@ -2117,7 +2117,7 @@ proc savepage {id} {
     } else {
         if {![authorized node create]} { no_auth }
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
-        if {![info exists input(level)] || ![string match {X[0123]???} $input(level)]} { set input(level) $::settings(DEFAULT_LEVEL) }
+        if {![info exists input(level)] || ![string match {0[0123]???} $input(level)]} { set input(level) $::settings(DEFAULT_LEVEL) }
         db eval {insert into nodes (name,content,level) values($input(name),$input(content),$input(level))}
         set id [db last_insert_rowid]
         set new 1
@@ -2179,7 +2179,7 @@ proc showlinks {id} {
     html_head "Pages linking to $name"
     puts "<h1>Links to &quot;$name&quot;</h1><br>"
     set level_idx [lindex $::request(USER_LEVEL) 0]
-    db eval {select nodes.id as link,nodes.name from nodes,links where links.type='node' and links.target=$id and links.node=nodes.id and substr(nodes.level,$level_idx+1,1)>=1} {
+    db eval {select nodes.id as link,nodes.name from nodes,links where links.type='node' and links.target=$id and links.node=nodes.id and substr(nodes.level,$level_idx+1,1)>='1'} {
         puts "[link node:$link $name]<br>"
     }
     if {![info exists link]} {
