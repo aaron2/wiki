@@ -958,8 +958,8 @@ proc showhistory {nodeid} {
     db eval {select name,tf(modified) as modified,modified_by,content as currcontent from nodes where id=$nodeid} {}
     if {![info exists name] && ![db exists {select original from history where original=$nodeid limit 1}]} {
         http_error 404 "no such node"
-        set currcontent {}
     }
+    if {![info exists currcontent]} { set currcontent {} }
     set currev [db onecolumn {select count(id) from history where original=$nodeid}]
     get_input a
     http_header
