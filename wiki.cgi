@@ -981,8 +981,10 @@ proc showhistory {nodeid} {
 
     if {![info exists name]} {
         puts "Node is deleted<br><br>"
+        set linkname {}
     } else {
         puts "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
+        set linkname current
     }
     puts "<table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>"
     puts "<table class=wikilist>[th x {Rev 0} {Created 0} {By 0} {"Line &#916" 0} {Compare 0}]"
@@ -991,7 +993,7 @@ proc showhistory {nodeid} {
         if {![info exists name]} {
             puts "<tr><td align=center>-</td><td>[lindex $history 1 1]</td><td>[lindex $history 1 2]</td>
                 <td align=center>-[linechange 0 $history]</td>
-                <td align=right>[link history:$nodeid:[lindex $history 1 0]:[lindex $history 2 0] prev]</td></tr>"
+                <td>[link history:$nodeid:[lindex $history 1 0]:[lindex $history 2 0] prev]</td></tr>"
             set next 2
         } else {
             puts "<tr><td align=center>[link node:$nodeid $currev]</td><td>$modified</td><td>$modified_by</td>
@@ -1006,13 +1008,13 @@ proc showhistory {nodeid} {
         foreach {rev created created_by} $x break
         puts "<tr><td align=center>[link history:$nodeid:$rev $rev]</td><td>$created</td><td>$created_by</td>
             <td align=center>[linechange [expr {$next - 1}] $history]</td>
-            <td>[link history:$nodeid:C:$rev current] [link history:$nodeid:$rev:[lindex $history $next 0] prev]</td></tr>"
+            <td>[link history:$nodeid:C:$rev $linkname] [link history:$nodeid:$rev:[lindex $history $next 0] prev]</td></tr>"
     }
 
     if {$page == $lastpage} {
         puts "<tr><td align=center>[link history:$nodeid:[lindex $history end 0] [lindex $history end 0]]</td><td>[lindex $history end 1]</td>
             <td>[lindex $history end 2]</td><td align=center><b>[linechange $next [linsert [lrange $history end end] end [list {} {} {} full {}]]]</b></td>
-            <td>[link history:$nodeid:C:[lindex $history end 0] current]</td></tr>"
+            <td>[link history:$nodeid:C:[lindex $history end 0] $linkname]</td></tr>"
     }
     puts "</table></td></tr>$nav</table></body></html>"
 }
