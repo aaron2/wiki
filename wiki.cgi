@@ -16,7 +16,7 @@ proc userlist {} {
     get_input a
 
     if {[info exists a(sort)]} { set sort $a(sort) }
-    sortable sort order {user created modified perms} {"lower(user)" "created desc" "level desc"}
+    sortable sort order {user created modified perms} {lower(user) created level}
     pagination a 50 wiki:users [db onecolumn {select count(user) from users}]
 
     html_head "User list" {
@@ -1168,7 +1168,7 @@ proc taglist {} {
     http_header
     html_head "Tag list"
     if {[info exists a(sort)]} { set sort $a(sort) }
-    sortable sort order {tag links} {"tags.name" "c desc"}
+    sortable sort order {tag links} {tags.name c}
 
     puts "<h1>Tag list</h1><br><table class=wikilist>[th $sort {Tag 1} {Links 1}]"
     set level_idx [lindex $::request(USER_LEVEL) 0]
@@ -1194,12 +1194,26 @@ proc params {base input_var args} {
 proc sortable {sort_var order_var valid sql} {
     upvar $sort_var sort
     upvar $order_var order
-    set default 0
-    if {[info exists sort] && [set i [lsearch -exact $valid $sort]] >= 0} {
-        set default $i
+    if {![info exists sort]} {
+        set order [lindex $sql 0]
+        set sort [lindex $valid 0]
+        return
     }
-    set order [lindex $sql $default]
-    set sort [lindex $valid $default]
+    if {[string match *,* $sort]} {
+        set dir [lindex [split $sort ,] end]
+        set sort [lindex [split $sort ,] 0]
+    }
+    if {[set i [lsearch -exact $valid $sort]] >= 0} {
+        set order [lindex $sql $i]
+        set sort [lindex $valid $i]
+        if {[info exists dir]} {
+            append order " $dir"
+            append sort ",$dir"
+        }
+        return
+    }
+    set order [lindex $sql 0]
+    set sort [lindex $valid 0]
 }
 
 proc pagination {input per link total} {
@@ -1240,7 +1254,7 @@ proc nodelist {} {
     html_head "Node list"
 
     if {[info exists a(sort)]} { set sort $a(sort) }
-    sortable sort order {name created modified perms} {"lower(name)" "created desc" "modified desc" level}
+    sortable sort order {name created modified perms} {lower(name) created modified level}
     pagination a 200 wiki:nodes [db onecolumn {select count(id) from nodes}]
     set level_idx [lindex $::request(USER_LEVEL) 0]
 
@@ -1263,8 +1277,10 @@ proc th {sort args} {
     foreach {name sortable} [join $args] {
         if {$sortable} {
             set param [string tolower [string map {" " ""} $name]]
-            if {$param == $sort} {
-                append out "<th id=sorted>$name</th>"
+            if {"$param,desc" == $sort} {
+                append out "<th id=sorted><a href=\"?sort=$param\">$name &#9660;</a></th>"
+            } elseif {"$param,asc" == $sort || $param == $sort} {
+                append out "<th id=sorted><a href=\"?sort=$param,desc\">$name &#9650;</a></th>"
             } else {
                 append out "<th><a href=\"?sort=$param\">$name</a></th>"
             }
@@ -1284,7 +1300,7 @@ proc filelist {} {
 
     pagination a 200 wiki:files [db onecolumn {select count(id) from files}]
     if {[info exists a(sort)]} { set sort $a(sort) }
-    sortable sort order {name created modified size} {"lower(name)" "created desc" "modified desc" "fsize(filename) desc"}
+    sortable sort order {name created modified size} {lower(name) created modified fsize(filename)}
 
     puts "<h1>File list</h1><br>"
     puts "<table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
