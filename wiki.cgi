@@ -1390,15 +1390,8 @@ proc upload_post {id} {
         if {$name == ""} { set name [file rootname $tail] }
         set base [filepath]
         set tail [string map {" " _} $tail]
-        #set filename [file join $base $tail]
-        #set num 1
-        #while {[file exists $filename]} {
-        #    set filename [file join $base [format %s%d%s [file rootname $base] $num [file extension $base]]]
-        #    incr num
-        #}
-        # start with 0000 before filename, increment it until we get a unique name
-        set num 0
-        while {[file exists [set filename [format "%s/%04d%s" $base $num $tail]]]} { incr num }
+        set magic [expr {int(rand()*pow(10, 8))}]
+        while {[file exists [set filename [format "%s/%d_%s" $base $magic $tail]]]} { set magic [expr {int(rand()*pow(10, 8))}] }
     } else {
         # if its not new and there was no file, just update the name
         if {$filedata == ""} {
