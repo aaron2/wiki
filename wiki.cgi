@@ -1965,11 +1965,12 @@ proc setup_interp {} {
 
 proc subst_commands {id var} {
     upvar $var data
-    set indices [lreverse [regexp -all -inline -indices {%(\w+?)\{(.*?)\}%} $data]]
+    set indices [regexp -all -inline -indices {%(\w+?)\{(.*?)\}%} $data]
     if {[llength $indices] == 0} { return }
 
     set i [setup_interp]
-    foreach {contents_i type_i all_i} $indices {
+    set rout [list]
+    foreach {all_i type_i contents_i} $indices {
         set output {}
         set type [string range $data [lindex $type_i 0] [lindex $type_i 1]]
         switch -exact -- $type {
@@ -1977,27 +1978,31 @@ proc subst_commands {id var} {
             tcl {
                 interp invokehidden $i db eval "select id,name,tf(modified) as modified,tf(created) as created,modified_by from pages where id='$id'" {}
                 if {[catch {interp eval $i [string range $data [lindex $contents_i 0] [lindex $contents_i 1]]} err]} {
-                    set output "<i>error in script</i>\n<!--\n[filter_html $::errorInfo]\n-->\n"
+                    lappend rout "<i>error in script</i>\n<!--\n[filter_html $::errorInfo]\n-->\n"
                 } elseif {$::settings(FILTER_HTML)} {
-                    set output [filter_white_html $output]
+                    lappend rout [filter_white_html $output]
+                } else {
+                    lappend rout $output
                 }
             }
             include {
                 set node [string range $data [lindex $contents_i 0] [lindex $contents_i 1]]
                 interp eval $i [list set __inc $node]
                 if {[string is integer -strict $node]} {
-                    set output [interp eval $i [list sql {select id,name,parsed from pages where id=$__inc}]]
+                    set tout [interp eval $i [list sql {select id,name,parsed from pages where id=$__inc}]]
                 } else {
-                    set output [interp eval $i [list sql {select id,name,parsed from pages where lower(name)=lower($__inc)}]]
+                    set tout [interp eval $i [list sql {select id,name,parsed from pages where lower(name)=lower($__inc)}]]
                 }
-                if {$output == ""} {
-                    set output "<!-- node not found -->"
+                if {$tout == ""} {
+                    lappend rout "<!-- node not found -->"
                 } else {
-                    set output "<div class=include><div class=include-header>[link node:[lindex $output 0] [lindex $output 1]]</div><div class=include-content>[lindex $output 2]</div></div>"
+                    lappend rout "<div class=include><div class=include-header>[link node:[lindex $tout 0] [lindex $tout 1]]</div><div class=include-content>[lindex $tout 2]</div></div>"
                 }
             }
         }
-        set data [string replace $data [lindex $all_i 0] [lindex $all_i 1] $output]
+    }
+    foreach o [lreverse $rout] {contents_i type_i all_i} [lreverse $indices] {
+        set data [string replace $data [lindex $all_i 0] [lindex $all_i 1] $o]
     }
     interp delete $i
 }
