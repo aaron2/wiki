@@ -1,7 +1,11 @@
 file delete wiki.db
 
 set argv none
-source initialize_db
+if {[file exists initialize_db.tcl]} {
+    source initialize_db.tcl
+} else {
+    source initialize_db
+}
 wiki
 fts
 source wiki.cgi
@@ -31,3 +35,5 @@ foreach file [lsort [glob *]] {
     #puts "add $file"
     add_file $file
 }
+
+exit
