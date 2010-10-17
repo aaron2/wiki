@@ -3,7 +3,7 @@ namespace eval httpd {}
 proc httpd::incoming_connection {s addr port} {
     variable incoming_req
     #logger "connection $s $addr $port"
-    fconfigure $s -blocking 0 -translation crlf
+    fconfigure $s -blocking 0 -translation {binary crlf}
     fileevent $s readable [list [namespace current]::read_conn $s $addr]
     dict set incoming_req($s) body {}
     after 5000 [list [namespace current]::timeout $s]
@@ -25,11 +25,11 @@ proc httpd::read_conn {s addr} {
  
     dict append incoming_req($s) body [read $s]
  
-    if {![dict exists $incoming_req($s) header] && [string first \n\n [dict get $incoming_req($s) body]] < 0} {
+    if {![dict exists $incoming_req($s) header] && [string first \r\n\r\n [dict get $incoming_req($s) body]] < 0} {
         return
     } elseif {![dict exists $incoming_req($s) header]} {
-        if {![regexp {^([A-Z]{3,4})\s+(.*)\s+HTTP/1\.[01]\n} [dict get $incoming_req($s) body] -> method uri]} {
-            http_error $s 500 "500 Internal Server Error" "Invalid request"
+        if {![regexp {^([A-Z]{3,4})\s+(.*)\s+HTTP/1\.[01]\r\n} [dict get $incoming_req($s) body] -> method uri]} {
+           http_error $s 500 "500 Internal Server Error" "Invalid request"
         }
         set uri [string map [list "\\" "\\\\"] $uri]
         regsub -all -- {%([A-Fa-f0-9][A-Fa-f0-9])} $uri {\\u00\1} uri
@@ -39,10 +39,10 @@ proc httpd::read_conn {s addr} {
         dict set incoming_req($s) uri $uri
         dict set incoming_req($s) method $method
 
-        set header [string range [dict get $incoming_req($s) body] 0 [string first \n\n [dict get $incoming_req($s) body]]]
+        set header [string range [dict get $incoming_req($s) body] 0 [string first \r\n\r\n [dict get $incoming_req($s) body]]]
         dict set incoming_req($s) body [string range [dict get $incoming_req($s) body] [expr {[string length $header] + 1}] end]
         foreach x [lrange [split $header \n] 1 end] {
-            set x [split $x :]
+            set x [split [string trimright $x \r] :]
             dict set incoming_req($s) header [string tolower [lindex $x 0]] [string trim [join [lrange $x 1 end] :]]
         }
     }
@@ -232,6 +232,11 @@ proc httpd::puts {args} {
     #eval logger $args
     if {[lindex $args 0] == "-nonewline"} {
         set args [lrange $args 1 end]
+    }
+    # write to a fh
+    if {[llength $args] > 1} {
+        eval _puts $args
+        return
     }
     #lappend [namespace current]::buf [string trimright [join $args] \n]
     lappend [namespace current]::buf [lindex $args 0]
