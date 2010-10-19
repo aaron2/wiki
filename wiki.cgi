@@ -20,7 +20,7 @@ proc userlist {} {
     pagination a 50 wiki:users [db onecolumn {select count(user) from users}]
 
     html_head "User list" {
-        <script src="include/jquery-1.3.2.min.js"></script>}
+        <script src="include/jquery-1.4.3.min.js"></script>}
 
     puts "<h1>User List</h1><br>
         <table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>
