@@ -152,6 +152,14 @@ proc editor {userlevel objectlevel action name content back} {
     puts "</div></form>"
 }
 
+proc clonenode {id} {
+    if {![authorized node create]} { no_auth }
+    if {![authorized node view $id]} { no_auth }
+    db eval {select name,content from nodes where id=$id} {}
+    if {![info exists name]} { http_error 404 "no such node" }
+    editnode new "copy of $name" $content
+}
+
 # show the node editing page
 # input: existing node id or "new", optionally a title and initial content if the id is "new"
 # returns: nothing
@@ -1401,7 +1409,7 @@ proc upload_post {id} {
             return
         }
         # otherwise overwrite the existing file
-        set filename [file join $base [db onecolumn {select filename from files where id=$id}]]
+        set filename [file join [filepath] [db onecolumn {select filename from files where id=$id}]]
     }
 
     set fh [open $filename w]
@@ -2241,6 +2249,7 @@ proc service_request {} {
             node { showpage $arg }
             file { showfile $arg }
             tag  { showtag $arg }
+            clone { clonenode $arg }
             links { showlinks $arg }
             history { showhistory $arg }
             wiki {

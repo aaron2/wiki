@@ -1,0 +1,55 @@
+#!/usr/local/bin/tclsh8.5
+
+package require sqlite3
+
+set remove 0
+if {[lindex $argv 0] == "-remove"} {
+    set remove 1
+}
+
+if {[file isdirectory files]} {
+    cd files
+}
+set files [glob -type f *]
+sqlite3 db ../wiki.db
+
+puts "found [llength $files] files"
+
+set added 0
+foreach x $files {
+    if {[db exists {select id from files where filename=$x}]} continue
+    puts "added $x with id [create_entry $x]"
+    incr added
+}
+
+set removed 0
+set missing 0
+db eval {select id,name,filename from files} {
+    if {[file exists $filename]} continue
+    puts -nonewline "missing $filename - $name"
+    incr missing
+    if {$remove} {
+        db eval {delete from files where filename=$filename}
+        puts -nonewline " - removed"
+        incr removed
+    }
+    puts ""
+}
+
+puts ""
+puts "added: $added"
+puts "missing: $missing"
+puts "removed: $removed"
+
+proc create_entry {file} {
+    set new [regsub {\[1\]\.} $file .]
+    set name [file rootname $new]
+    set new [string map {" " _} $new]
+    set magic [expr {int(rand()*pow(10, 8))}]
+    while {[file exists [set filename [format "%d_%s" $magic $tail]]]} { set magic [expr {int(rand()*pow(10, 8))}] }
+    file rename $file $new
+
+    db eval {insert into files (name,original_name,filename,created,created_by,modified,modified_by) values($name,$file,$new,datetime('now'),'admin',datetime('now'),'admin')}
+    return [db last_insert_rowid]
+}
+
