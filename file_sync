@@ -3,8 +3,31 @@
 package require sqlite3
 
 set remove 0
-if {[lindex $argv 0] == "-remove"} {
-    set remove 1
+set user admin
+while {[llength $argv]} {
+    if {[lindex $argv 0] == "-remove"} {
+        set remove 1
+        set argv [lrange $argv 1 end]
+    } elseif {[lindex $argv 0] == "-user"} {
+        set user [lindex $argv 1]
+        set argv [lrange $argv 2 end]
+    }
+}
+if {$user == ""} {
+    puts stderr "-user requires an argument"
+    exit 1
+}
+
+proc create_entry {file} {
+    set new [regsub {\[1\]\.} $file .]
+    set name [file rootname $new]
+    set new [string map {" " _} $new]
+    set magic [expr {int(rand()*pow(10, 8))}]
+    while {[file exists [set filename [format "%d_%s" $magic $tail]]]} { set magic [expr {int(rand()*pow(10, 8))}] }
+    file rename $file $new
+
+    db eval {insert into files (name,original_name,filename,created,created_by,modified,modified_by) values($name,$file,$new,datetime('now'),$user,datetime('now'),$user)}
+    return [db last_insert_rowid]
 }
 
 if {[file isdirectory files]} {
@@ -40,16 +63,4 @@ puts ""
 puts "added: $added"
 puts "missing: $missing"
 puts "removed: $removed"
-
-proc create_entry {file} {
-    set new [regsub {\[1\]\.} $file .]
-    set name [file rootname $new]
-    set new [string map {" " _} $new]
-    set magic [expr {int(rand()*pow(10, 8))}]
-    while {[file exists [set filename [format "%d_%s" $magic $tail]]]} { set magic [expr {int(rand()*pow(10, 8))}] }
-    file rename $file $new
-
-    db eval {insert into files (name,original_name,filename,created,created_by,modified,modified_by) values($name,$file,$new,datetime('now'),'admin',datetime('now'),'admin')}
-    return [db last_insert_rowid]
-}
 

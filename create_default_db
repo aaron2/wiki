@@ -1,14 +1,23 @@
-file delete wiki.db
+#!/usr/local/bin/tclsh8.5
+
+set home [file normalize [file dirname $argv0]]
+set path [pwd]
+if {[lindex $argv 0] != ""} {
+    set path [lindex $argv 0]
+}
+if {[info exists [file join $path wiki.db]]} {
+    puts "wiki.db already exists"
+    exit 1
+}
 
 set argv none
 if {[file exists initialize_db.tcl]} {
-    source initialize_db.tcl
+    exec [file join initialize_db.tcl] $path
 } else {
-    source initialize_db
+    exec [file join $home initialize_db] $path
 }
-wiki
-fts
-source wiki.cgi
+source [file join $home wiki.cgi]
+open_databases $path
 
 if {[db onecolumn {select count(id) from nodes}] > 0} { error }
 

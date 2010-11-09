@@ -206,8 +206,37 @@ proc httpd::setup {cgi} {
     variable config
     variable buf
 
+    if {$::tcl_platform(platform) == "windows"} {
+        set root "$::env(APPDATA)/crakwiki"
+    } else {
+        set root "$::env(HOME)/.crackwiki"
+    }
+    if {[info exists config(base_dir)]} {
+        if {![string match {*[\\/]*} $config(base_dir)]} {
+            set config(base_dir) [file join $root $config(base_dir)]
+            if {![file exists $config(base_dir)]} { file mkdir $config(base_dir) }
+        } else {
+            set config(base_dir) [file normalize $config(base_dir)]
+            if {![file isdirectory $config(base_dir)]} {
+                usage "directory does not exist"
+            }
+        }
+    } else {
+        set config(base_dir) [file join $root default]
+        if {![file exists $config(base_dir)]} { file mkdir $config(base_dir) }
+    }
+    if {![file exists [file join $config(base_dir) wiki.db]]} {
+        set home [file normalize [file dirname $::argv0]]
+        if {[file exists [file join $home create_default_db]]} {
+            exec [file join $home create_default_db] $config(base_dir)
+        } elseif {[file exists [file join $home initialize_db]]} {
+            exec [file join $home initialize_db] $config(base_dir)
+        } else {
+            return -code error "no db exists in directory and unable to create one"
+        }
+    }
+
     fix_env
-    set config(base_dir) [pwd]
     namespace eval :: [list source $cgi]
     listen $config(port)
 
@@ -262,6 +291,10 @@ proc httpd::parse_cmdline {in} {
     variable config
     foreach {opt arg} $in {
         switch -exact -- $opt {
+            -dir {
+                if {$arg == ""} { usage "dir option requires an argument" }
+                set config(base_dir) $arg
+            }
             -port {
                 if {![string is integer -strict $arg]} { usage "port argument must be an integer" }
                 set config(port) $arg
@@ -280,6 +313,7 @@ proc httpd::parse_cmdline {in} {
 proc httpd::usage {err} {
     ::puts stderr "Error: $err\n"
     ::puts stderr "Usage: $::argv0 \[-opt arg]"
+    ::puts stderr "    -dir wiki base directory"
     ::puts stderr "    -port (Port to listen on for http connections) (default: 8080)"
     ::puts stderr "    -local_only (Only allow connections from localhost) (default: true)"
     ::exit 1
@@ -299,5 +333,6 @@ namespace eval httpd {
 }
 
 namespace import httpd::*
+open_databases $httpd::config(base_dir)
 if {[catch {package present Tk}]} { vwait forever }
 if {[file exists httpd_gui.tcl]} { namespace eval httpd {source httpd_gui.tcl} }

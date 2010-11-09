@@ -1,13 +1,17 @@
+#!/usr/local/bin/tclsh8.5
+
 package require sqlite3
 
-proc wiki {} {
-    if {[file exists wiki.db]} {
-        puts "wiki.db exists"
+proc wiki {{path {}}} {
+    set home [file normalize [file dirname $::argv0]]
+    set db [file join $path wiki.db]
+    if {[file exists $db]} {
+        puts "$db exists"
         exit 1
     }
-    sqlite3 new wiki.db
+    sqlite3 new $db
     
-    set fh [open schema r]
+    set fh [open [file join $home schema] r]
     new eval [read $fh]
     close $fh
     
@@ -39,23 +43,20 @@ proc wiki {} {
     #    new eval {insert into tags (name,node) values('wiki:home',$home)}
     #}
     
-    return wiki.db
+    return $db
 }
 
-proc fts {} {
-    if {[file exists wiki.db] && [file exists rebuild_ft_index]} {
-        source rebuild_ft_index
+proc fts {{path {}}} {
+    set home [file normalize [file dirname $::argv0]]
+    if {[file exists [file join $path wiki.db]] && [file exists [file join $home rebuild_ft_index]]} {
+        exec [file join $home rebuild_ft_index] $path
         puts "rebuilt fts.db from wiki.db"
-    } elseif {![file exists fts.db]} {
-        sqlite3 fts fts.db
+    } elseif {![file exists [file join $path fts.db]]} {
+        sqlite3 fts [file join $path fts.db]
         fts eval {create virtual table search using fts3('id','name','level','content', tokenize porter)}
     }
 }
 
-if {[llength $argv] == 0} { set argv [list wiki fts] }
-foreach x $argv {
-    if {[info commands $x] != ""} {
-        $x
-    }
-}
 
+wiki [lindex $argv 0]
+fts [lindex $argv 0]
