@@ -1091,7 +1091,7 @@ proc viewhistory {node rev} {
 proc deletefile {id} {
     if {![authorized file delete $id]} { no_auth }
     db eval {select filename from files where id=$id} {}
-    catch {file delete $filename}
+    catch {file delete [file join [filepath] $filename]}
     db eval {delete from files where id=$id}
     db eval {commit transaction}
     http_header
@@ -2211,11 +2211,10 @@ proc showlinks {id} {
     }
 }
 
-proc open_databases {} {
+proc open_databases {dir} {
     package require sqlite3
     #load /usr/local/lib/teapot/package/linux-glibc2.3-ix86/lib/sqlite33.6.18/libsqlite3.6.18.so Sqlite3
     #set dir [file dirname [pwd]]
-    set dir [pwd]
     sqlite3 db [file join $dir wiki.db]
     sqlite3 fts [file join $dir fts.db]
     fts eval {PRAGMA synchronous = OFF}
@@ -2292,8 +2291,8 @@ proc service_request {} {
 
 set t [time {
 
-open_databases
 if {[info exists env(GATEWAY_INTERFACE)]} {
+    open_databases [pwd]
     array set request [array get env]
     service_request
 
