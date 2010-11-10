@@ -115,23 +115,28 @@ proc httpd::request {s addr req} {
 }
 
 proc httpd::reply_file {s addr req} {
-    set path [split [dict get $req uri] /]
-    set i [lsearch $path files]
-    set file $::request(DOCUMENT_ROOT)/[join [lrange $path $i end] /]
-    if {![file exists $file]} {
-        http_error $s 404 "404 Not Found" "File not found"
+    set req [dict get $req uri]
+    if {$req == "/favicon.ico"} { set req /include/favicon.ico }
+    set search [list [pwd] $::request(DOCUMENT_ROOT)]
+
+    foreach dir $search {
+        set file $dir$req
+        if {![file exists $file]} continue
+
+        _puts $s "HTTP/1.0 200 OK"
+        _puts $s "Content-Type: [mimetype $file]"
+        _puts $s "Content-Length: [file size $file]\n"
+    
+        set fh [open $file r]
+        fconfigure $fh -encoding binary -translation lf -eofchar {}
+        fconfigure $s -encoding binary -translation lf
+        catch {fcopy $fh $s}
+        close $fh
+        close $s
+        return
     }
 
-    _puts $s "HTTP/1.0 200 OK"
-    _puts $s "Content-Type: [mimetype $file]"
-    _puts $s "Content-Length: [file size $file]\n"
-
-    set fh [open $file r]
-    fconfigure $fh -encoding binary -translation lf -eofchar {}
-    fconfigure $s -encoding binary -translation lf
-    catch {fcopy $fh $s}
-    close $fh
-    close $s
+    http_error $s 404 "404 Not Found" "File not found"
 }
 
 proc httpd::reply {s} {
@@ -163,7 +168,7 @@ proc httpd::reply {s} {
 }
 
 proc httpd::http_error {s err title body} {
-    set body "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n<HTML><HEAD>\n<TITLE>$title</TITLE>\n</HEAD><BODY>\n<H1>[lrange [split $title] 1 end]</H1>\n$body<P>\n</BODY></HTML>"
+    set body "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\n<HTML><HEAD>\n<TITLE>$title</TITLE>\n</HEAD><BODY>\n<H1>[lrange [split $title] 1 end]</H1>\n<P>$body</P>\n</BODY></HTML>"
     _puts $s "HTTP/1.0 $err\nDate: [clock format [clock seconds] -gmt 1 -format "%a, %d %b %Y %H:%M:%S"]Content-Type: text/html\nContent-Length: [string length $body]\n\n$body"
     close $s
     return -code return
