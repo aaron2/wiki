@@ -34,7 +34,7 @@ proc httpd::read_conn {s addr} {
         set uri [string map [list "\\" "\\\\"] $uri]
         regsub -all -- {%([A-Fa-f0-9][A-Fa-f0-9])} $uri {\\u00\1} uri
         set uri [subst -novar -nocommand $uri]
-        logger "$s $method $uri"
+        logger "$addr $method $uri"
 
         dict set incoming_req($s) uri $uri
         dict set incoming_req($s) method $method

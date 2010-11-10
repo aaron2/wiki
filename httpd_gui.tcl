@@ -1,7 +1,9 @@
 proc logger {msg} {
     set ts [clock format [clock seconds] -format {[%T]}]
     #_puts "$ts $msg"
+    .m.log.text configure -state normal
     .m.log.text insert end "\n$ts $msg"
+    .m.log.text configure -state disabled
 }
 
 proc tray { message ico wparam lparam x y } {
@@ -64,7 +66,7 @@ proc show_config_win {p} {
     array set ::tmpconfig [array get ::httpd::config]
     set w [toplevel .config -padx 5 -pady 5]
     wm title $w "Wiki Configuration"
-    wm attributes $w -toolwindow 1
+    catch {wm attributes $w -toolwindow 1}
     wm protocol $w WM_DELETE_WINDOW [list [namespace current]::hide_config_win $w]
     ttk::labelframe $w.config -text Configuration -padding 5
     frame $w.config.buttons
