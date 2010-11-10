@@ -42,8 +42,8 @@ proc hide_main_win {w} {
     if {![string equal [winfo toplevel $w] $w] || ![string equal [wm state $w] iconic]} return
     if {[info exists ico]} {
         winico taskbar add $ico -callback "[namespace current]::tray %m %i %w %l %x %y"
+        wm withdraw $w
     }
-    wm withdraw $w
 }
 
 proc hide_config_win {w} {
@@ -147,9 +147,9 @@ proc gui {} {
     update_gui $w
 }
 
-if {![catch {load Winico06.dll}]} {
+if {![catch {package require Winico}]} {
     #set ico [winico create [file join [file dirname [info script]] smiley.ico]]
-    set ico [winico load APP [info nameofexecutable]]
+    set ico [winico load TK [info nameofexecutable]]
 }
 
 gui
