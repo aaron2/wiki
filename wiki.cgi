@@ -1836,12 +1836,8 @@ proc static_call {id cmd data} {
 
             if {[info exists tns]} {
                 set tns [string map {icon 32x32 small 100x100 med 200x200 medium 200x200 large 640x480} $tns]
-                set path [filepath]
-                set thumb $path/thumbs/[file rootname $filename]_$tns[file extension $filename]
-                if {![file exists $thumb]} {
-                    catch {exec /usr/local/bin/convert -scale $tns $path/$filename $thumb}
-                }
-                return "<a href=\"files/$filename\"><img src=\"files/thumbs/[file tail $thumb]\" alt=\"$name\" /></a>"
+                set thumb [thumbnail $tns $filename]
+                return "<a href=\"files/$filename\"><img src=\"$thumb\" alt=\"$name\" /></a>"
             }
             return "<img src=\"files/$filename\" alt=\"$name\" />"
         }
@@ -1865,6 +1861,19 @@ proc static_call {id cmd data} {
             return "$cmd: $data"
         }
     }
+}
+
+proc thumbnail {size file} {
+    set thumb [file rootname $file]_$size[file extension $file]
+    set out [filepath]/thumbs/$thumb
+    set path files/thumbs/$thumb
+    set file [filepath]/$file
+    if {[file exists $out]} { return $path }
+    if {![catch {exec /usr/bin/convert -scale $size $file "JPEG:$out"}]} { return $path }
+    if {![catch {exec /usr/local/bin/convert -scale $size $file "JPEG:$out"}]} { return $path }
+    set convert [lindex [glob -nocomplain "c:/program files/imagemagick*/convert.exe"] 0]
+    catch {exec $convert -scale $size "$file" "JPEG:$out"}
+    return $path
 }
 
 proc filepath {{file {}}} {
@@ -1950,8 +1959,8 @@ proc setup_interp {} {
     set level_idx [lindex $::request(USER_LEVEL) 0]
     interp eval $i "
         #auto_load_index
-        load \"[lindex [lsearch -exact -index 1 -inline [info loaded] Sqlite3] 0]\"
-        sqlite3 db wiki.db -readonly 1
+        load \"[lindex [lsearch -index 1 -inline [info loaded] *qlite*] 0]\"
+        sqlite3 db \"[file join $::dbdir wiki.db]\" -readonly 1
         db function tf format_time
         db eval \"create temp view pages as select * from nodes where substr(level,$level_idx+1,1)>='1'\"
         db authorizer db_auth
@@ -2213,13 +2222,12 @@ proc showlinks {id} {
 
 proc open_databases {dir} {
     package require sqlite3
-    #load /usr/local/lib/teapot/package/linux-glibc2.3-ix86/lib/sqlite33.6.18/libsqlite3.6.18.so Sqlite3
-    #set dir [file dirname [pwd]]
     sqlite3 db [file join $dir wiki.db]
     sqlite3 fts [file join $dir fts.db]
     fts eval {PRAGMA synchronous = OFF}
     db function tf {format_time}
     db timeout 3000
+    set ::dbdir $dir
 }
 
 proc settings {} {
