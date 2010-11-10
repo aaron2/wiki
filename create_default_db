@@ -1,36 +1,38 @@
 #!/usr/local/bin/tclsh8.5
 
-set home [file normalize [file dirname $argv0]]
+set home [file normalize [file dirname $::argv0]]
 set path [pwd]
-if {[lindex $argv 0] != ""} {
-    set path [lindex $argv 0]
+if {[lindex $::argv 0] != ""} {
+    set path [lindex $::argv 0]
 }
 if {[info exists [file join $path wiki.db]]} {
     puts "wiki.db already exists"
-    exit 1
+    ::exit 1
 }
 
-set argv none
-if {[file exists initialize_db.tcl]} {
-    exec [file join initialize_db.tcl] $path
+if {[file exists [file join $home initialize_db.tcl]]} {
+    set ::argv [list $path]
+    source [file join $home initialize_db.tcl]
 } else {
-    exec [file join $home initialize_db] $path
+    set ::argv [list $path]
+    source [file join $home initialize_db]
 }
-source [file join $home wiki.cgi]
+namespace eval :: [list source [file join $home wiki.cgi]]
 open_databases $path
 
 if {[db onecolumn {select count(id) from nodes}] > 0} { error }
 
-set request(USER_LEVEL) {4 {nc wc}}
+set ::request(USER_LEVEL) {4 {nc wc}}
 settings
-set settings(FILTER_HTML) 0
+set ::settings(FILTER_HTML) 0
 
 proc add_file {file} {
     set fh [open $file r]
-    set content [read $fh]
+    set content [::read $fh]
     close $fh
 
-    db eval {insert into nodes (name,content,level) values($file,$content,'00113')}
+    set name [file tail $file]
+    db eval {insert into nodes (name,content,level) values($name,$content,'00113')}
     set id [db last_insert_rowid]
     set parsed [parse_static $id $content]
     set strip "$file [striphtml $parsed]"
@@ -39,10 +41,8 @@ proc add_file {file} {
     fts eval {insert into search (id,name,level,content) values($id,$file,'00113',$strip)}
 }
 
-cd default_content
-foreach file [lsort [glob *]] {
-    #puts "add $file"
+foreach file [lsort [glob [file join $home default_content *]]] {
+    #::puts "add $file"
     add_file $file
 }
 
-exit

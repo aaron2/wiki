@@ -2,7 +2,7 @@
 
 package require sqlite3
 
-proc wiki {{path {}}} {
+proc create_wiki {{path {}}} {
     set home [file normalize [file dirname $::argv0]]
     set db [file join $path wiki.db]
     if {[file exists $db]} {
@@ -12,7 +12,7 @@ proc wiki {{path {}}} {
     sqlite3 new $db
     
     set fh [open [file join $home schema] r]
-    new eval [read $fh]
+    new eval [::read $fh]
     close $fh
     
     set settings {
@@ -46,7 +46,7 @@ proc wiki {{path {}}} {
     return $db
 }
 
-proc fts {{path {}}} {
+proc create_fts {{path {}}} {
     set home [file normalize [file dirname $::argv0]]
     if {[file exists [file join $path wiki.db]] && [file exists [file join $home rebuild_ft_index]]} {
         exec [file join $home rebuild_ft_index] $path
@@ -58,5 +58,5 @@ proc fts {{path {}}} {
 }
 
 
-wiki [lindex $argv 0]
-fts [lindex $argv 0]
+create_wiki [lindex $::argv 0]
+create_fts [lindex $::argv 0]

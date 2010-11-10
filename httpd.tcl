@@ -40,7 +40,7 @@ proc httpd::read_conn {s addr} {
         dict set incoming_req($s) method $method
 
         set header [string range [dict get $incoming_req($s) body] 0 [string first \r\n\r\n [dict get $incoming_req($s) body]]]
-        dict set incoming_req($s) body [string range [dict get $incoming_req($s) body] [expr {[string length $header] + 1}] end]
+        dict set incoming_req($s) body [string range [dict get $incoming_req($s) body] [expr {[string length $header] + 3}] end]
         foreach x [lrange [split $header \n] 1 end] {
             set x [split [string trimright $x \r] :]
             dict set incoming_req($s) header [string tolower [lindex $x 0]] [string trim [join [lrange $x 1 end] :]]
@@ -129,7 +129,7 @@ proc httpd::reply_file {s addr req} {
     set fh [open $file r]
     fconfigure $fh -encoding binary -translation lf -eofchar {}
     fconfigure $s -encoding binary -translation lf
-    fcopy $fh $s
+    catch {fcopy $fh $s}
     close $fh
     close $s
 }
@@ -204,10 +204,9 @@ proc httpd::listen {port} {
 
 proc httpd::setup {cgi} {
     variable config
-    variable buf
 
     if {$::tcl_platform(platform) == "windows"} {
-        set root "$::env(APPDATA)/crakwiki"
+        set root "$::env(APPDATA)/crackwiki"
     } else {
         set root "$::env(HOME)/.crackwiki"
     }
@@ -225,17 +224,23 @@ proc httpd::setup {cgi} {
         set config(base_dir) [file join $root default]
         if {![file exists $config(base_dir)]} { file mkdir $config(base_dir) }
     }
+    set home [file normalize [file dirname $::argv0]]
     if {![file exists [file join $config(base_dir) wiki.db]]} {
-        set home [file normalize [file dirname $::argv0]]
         if {[file exists [file join $home create_default_db]]} {
-            exec [file join $home create_default_db] $config(base_dir)
-        } elseif {[file exists [file join $home initialize_db]]} {
-            exec [file join $home initialize_db] $config(base_dir)
+            set ::argv [list $config(base_dir)]
+            source [file join $home create_default_db]
+        } elseif {[file exists initialize_db]} {
+            set ::argv [list $config(base_dir)]
+            source initialize_db
         } else {
             return -code error "no db exists in directory and unable to create one"
         }
     }
+    if {![file exists [file join $config(base_dir) files]]} {
+        file mkdir [file join $config(base_dir) files thumbs]
+    }
 
+    cd $home
     fix_env
     namespace eval :: [list source $cgi]
     listen $config(port)
@@ -332,6 +337,7 @@ namespace eval httpd {
     setup wiki.cgi
 }
 
+package provide crackwiki 1.0
 namespace import httpd::*
 open_databases $httpd::config(base_dir)
 if {[catch {package present Tk}]} { vwait forever }
