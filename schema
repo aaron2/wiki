@@ -57,6 +57,7 @@ CREATE TABLE users (
 user varchar primary key,
 ip varchar,
 password varchar,
+salt varchar,
 name varchar,
 email varchar,
 created datetime,

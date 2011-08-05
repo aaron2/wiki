@@ -14,9 +14,10 @@ proc userlist {} {
     if {![authorized user view]} { no_auth }
     http_header
     get_input a
+    db function userlevel_name {userlevel_name}
 
     if {[info exists a(sort)]} { set sort $a(sort) }
-    sortable sort order {user created modified perms} {lower(user) created level}
+    sortable sort order {user name created email level} {lower(user) lower(name) created email userlevel_name(level)}
     pagination a 50 wiki:users [db onecolumn {select count(user) from users}]
 
     html_head "User list" {
@@ -29,16 +30,16 @@ proc userlist {} {
         <input type=hidden name=action>
         <input type=hidden name=isadmin value=\"[has_perm $::request(USER_LEVEL) ua]\">
         <table class=wikilist><tbody id=list>
-        [th $sort {Edit 0} {User 1} {Host 0} {Password 0} {Name 0} {Email 0} {Created 1} {Level 1}]"
-    db eval "select * from users order by $order limit $perpage offset $offset" {
-        puts "<tr><td align=center></td>
+        [th $sort {{} 0} {User 1} {Host 0} {Password 0} {Name 1} {Email 1} {Created 1} {Level 1}]"
+    db eval "select user,ip,name,email,created,userlevel_name(level) as level from users order by $order limit $perpage offset $offset" {
+        puts "<tr><td align=center>edit</td>
              <td>$user</td>
              <td>$ip</td>
              <td align=center>&#149;&#149;&#149;&#149;</td>
              <td>$name</td>
              <td>$email</td>
              <td>[format_time $created]</td>
-             <td>[userlevel_name $level]</td></tr>"
+             <td>$level</td></tr>"
     }
     puts "</tbody></table><a href=# style=\"padding-left: .5em;\" id=new>new</a></form></td></tr></table>
         <script src=\"include/userlist.js\"></script></body></html>"
@@ -76,7 +77,6 @@ proc nodelevel_name {{level {}}} {
 # returns: nothing
 proc saveusers {} {
     get_post input
-    db function password {hash_pass}
     array set rev_map [string tolower [lreverse [userlevel_name]]]
     if {[info exists input(level)] && [info exists rev_map($input(level))]} {
         set input(level) $rev_map($input(level))
@@ -95,7 +95,10 @@ proc saveusers {} {
             }
             set nlevel [userlevel_name $input(level)]
             if {[info exists input(password)] && $input(password) != ""} {
-                db eval {update users set password=password($input(password)) where user=$input(user)}
+                set h [hash_pass $input(password)]
+                set hash [lindex $h 0]
+                set salt [lindex $h 1]
+                db eval {update users set password=$hash, salt=$salt where user=$input(user)}
             }
 
             db eval {update users set email=$input(email),ip=$input(host),level=$input(level),name=$input(name) where user=$input(user)}
@@ -111,7 +114,10 @@ proc saveusers {} {
                 http_error 400
             }
             set nlevel [userlevel_name $input(level)]
-            db eval {insert into users (user,ip,password,name,email,created,level) values($input(newuser),$input(host),password($input(password)),$input(name),$input(email),datetime('now'),$input(level))}
+            set h [hash_pass $input(password)]
+            set hash [lindex $h 0]
+            set salt [lindex $h 1]
+            db eval {insert into users (user,ip,password,salt,name,email,created,level) values($input(newuser),$input(host),$hash,$salt,$input(name),$input(email),datetime('now'),$input(level))}
             set res "<td></td><td>$input(newuser)</td><td>$input(host)</td><td align=center>&#149;&#149;&#149;&#149;</td><td>$input(name)</td><td>$input(email)</td><td>[format_time [db onecolumn {select created from users where user=$input(newuser)}]]</td><td>$nlevel</td>"
         }
         delete {
@@ -365,21 +371,21 @@ proc validpass {user pass} {
     return 1
 }
 
-# implements the password hashing function password() in the db
-# input: cleartext password
-# output: hashed password
-proc hash_pass {pass} {
-    #package require md5 2
-    source packages/md5/md5x.tcl
-    return [md5::md5 -hex $pass]
+proc hash_pass {pass {salt {}}} {
+    #package require sha1
+    source packages/sha1/sha1.tcl
+    if {$salt == ""} { set salt [random_string 10] }
+    set hash $salt$pass
+    for {set i 0} {$i < 2} {incr i} {
+        set hash [sha1::sha1 $hash]
+    }
+    return [list $hash $salt]
 }
-
 # handles the post of the user preferences page
 # input: form postdata
 # returns: nothing
 proc saveprefs {} {
     get_post input
-    db function password {hash_pass}
     if {[info exists input(password)] && $input(password) != "" && [info exists input(user)] && $input(user) != ""} {
         if {![authorized user password $input(user)]} { no_auth }
         set user $input(user)
@@ -387,7 +393,10 @@ proc saveprefs {} {
         if {![validpass $user $pass]} {
            lappend status "Bad password"
         } else {
-            db eval {update users set password=password($pass) where user=$user}
+            set h [hash_pass $pass]
+            set hash [lindex $h 0]
+            set salt [lindex $h 1]
+            db eval {update users set password=$hash, salt=$salt where user=$user}
             db eval {commit transaction}
         }
     }
@@ -733,16 +742,21 @@ proc http_error {code {text {An error occured}}} {
 # returns: nothing
 proc do_login {} {
     get_post input
-    db function password {hash_pass}
     if {![info exists input(username)] || ![info exists input(password)]} {
         location wiki:login
         db eval {rollback transaction}
         return
     }
     set user $input(username)
-    set pass $input(password)
     set ip $::request(REMOTE_ADDR)
-    if {![db exists {select user from users where user=$user and password=password($pass) and password<>''}]} {
+    db eval {select salt from users where user=$user and password<>''} {}
+    if {![info exists salt] || $salt == "" || $input(password) == ""} {
+        location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
+        db eval {rollback transaction}
+        return
+    }
+    set hash [lindex [hash_pass $input(password) $salt] 0]
+    if {![db exists {select user from users where user=$user and password=$hash}]} {
         location wiki:login?message=incorrect%20username%20or%20password[expr {[info exists input(href)] ? "&href=$input(href)" : ""}]
         db eval {rollback transaction}
         return
@@ -752,19 +766,24 @@ proc do_login {} {
     location [expr {[info exists input(href)] ? "$input(href)" : ""}]
 }
 
-proc set_auth_cookie {user expires} {
-    # create random 32 char auth token
+proc random_string {len} {
     set chars abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
     set size [string length $chars]
-    for {set i 0} {$i < 32} {incr i} {
-        append key [string index $chars [expr {int(rand() * $size)}]]
+    set str ""
+    for {set i 0} {$i < $len} {incr i} {
+        append str [string index $chars [expr {int(rand() * $size)}]]
     }
+    return $str
+}
 
+proc set_auth_cookie {user expires} {
+    set key [random_string 32]
     set_cookie AUTH $key $expires
     if {$expires == ""} { set expires "2 days" }
     set ip $::request(REMOTE_ADDR)
     set expires [clock format [clock scan $expires] -format "%Y-%m-%d %H:%M:%S" -gmt 1]
-    db eval {delete from cookies where user=$user and (expires<datetime('now') or ip=$ip)}
+    #db eval {delete from cookies where user=$user and (expires<datetime('now') or ip=$ip)}
+    db eval {delete from cookies where user=$user and expires<datetime('now')}
     db eval {insert into cookies (user,ip,key,created,expires) values($user,$ip,$key,datetime('now'),$expires)}
 }
 
@@ -889,20 +908,21 @@ proc do_search {{q {}}} {
     append results "<h3>Tag results</h3>"
     db eval "select nodes.id as id,nodes.name,tags.node,count(tags.name) from tags,nodes where tags.name in ([join $tagterms ,]) and tags.node=nodes.id and substr(nodes.level,$level_idx+1,1)>='1' group by tags.node order by count(tags.name) desc" {
         if {$numterms == $count(tags.name)} { lappend matches $id }
-        append results "[link node:$node $name]&nbsp;&nbsp;&nbsp;<span class=tags>("
+        append results "[link node:$node $name]&nbsp;&nbsp;&nbsp;<span class=tags>\[ "
+        set tags [list]
         db eval {select name from tags where node=$id} {
-            append results "[link tag:$name $name] "
+            lappend tags [link tag:$name $name]
         }
-        append results ")</span><br>"
+        append results "[join $tags] ]</span><br>"
     }
 
     append results "<br><h3>Full text results</h3>"
     fts eval {select id,name,snippet(search) as snippet from search where content match $input(string) and substr(level,$level_idx+1,1)>='1'} {
         append results "[link node:$id $name]"
         if {[set tags [db eval {select name from tags where node=$id}]] != ""} {
-            append results "&nbsp;&nbsp;&nbsp;<span class=tags>( "
+            append results "&nbsp;&nbsp;&nbsp;<span class=tags>\[ "
             foreach x $tags { append results "[link tag:$x $x] " }
-            append results ")</span>"
+            append results "]</span>"
         }
         append results "<br>$snippet<br><br>"
         lappend matches $id
@@ -994,6 +1014,7 @@ proc showhistory {nodeid} {
         puts "Current name &quot;[link node:$nodeid $name]&quot;<br><br>"
         set linkname current
     }
+    set next 1
     puts "<table style=\"border: 0px; padding: 0px;\">$nav<tr><td style=\"border: 0px; padding: 0px;\" colspan=3>"
     puts "<table class=wikilist>[th x {Rev 0} {Created 0} {By 0} {"Line &#916" 0} {Compare 0}]"
 
@@ -1007,7 +1028,6 @@ proc showhistory {nodeid} {
             puts "<tr><td align=center>[link node:$nodeid $currev]</td><td>$modified</td><td>$modified_by</td>
                 <td align=center>[linechange 0 $history]</td>
                 <td align=right>[link history:$nodeid:C:[lindex $history 1 0] prev]</td></tr>"
-            set next 1
         }
     }
 
@@ -1168,6 +1188,15 @@ proc wikitag {name} {
         location node:$id
     } else {
         http_error 404 "no such node"
+    }
+}
+
+proc showuser {user} {
+    set name user:$name
+    db eval {select id from nodes,tags where tags.name=$name and tags.node=nodes.id order by nodes.modified desc limit 1} {}
+    if {[info exists id]} {
+        showpage $id
+    } else {
     }
 }
 
@@ -1558,7 +1587,7 @@ proc parse_blocks {id blocks} {
         switch -exact -- $type {
             TABLE {
                 set block [text_formatting $block]
-                set block [static_links $id $block]
+                set block [static_links $id $block table]
                 append output [static_table $block]
             }
             PARA {
@@ -1601,15 +1630,23 @@ proc parse_blocks {id blocks} {
     return $output
 }
 
-proc static_links {id data} {
+proc static_links {id data {context normal}} {
     foreach x [lreverse [regexp -all -inline -indices -nocase {%[a-z]*?%} $data]] {
         set var [string trim [string range $data {*}$x] %]
         set t [time {set data [string replace $data {*}$x [static_variable $var]]}]
     }
-    foreach {x junk} [lreverse [regexp -all -inline -indices {(?:[\s\|^])((?:\([^\(\)]+\):)?[a-z]{3,7}://[^[:space:]\"\n<]+)} $data]] {
+
+    # allow pipe char in urls except when we are in table context
+    if {$context == "table"} {
+        set re {(?:[\s\|^])((?:\([^\(\)]+\):)?[a-z]{3,7}://[^[:space:]\"\n<|]+)}
+    } else {
+        set re {(?:[\s\|^])((?:\([^\(\)]+\):)?[a-z]{3,7}://[^[:space:]\"\n<]+)}
+    }
+    foreach {x junk} [lreverse [regexp -all -inline -indices $re $data]] {
         set url [string range $data {*}$x]
         set data [string replace $data {*}$x [static_http $url]]
     }
+
     foreach {linkid target name all} [lreverse [regexp -all -inline -indices {\m([a-z]{3,7}):(?:\(([^\)]+)\)|([[:digit:]]+))} $data]] {
         if {$target == "-1 -1"} { set target $linkid }
         set res [static_call $id [string range $data {*}$name] [string range $data {*}$target]]
@@ -2242,12 +2279,16 @@ proc service_request {} {
     get_cookies
     settings
     authenticate
-    #parray request
+    #parray ::request
 
     #set doc [split [string range $::request(PATH_TRANSLATED) [string length [file dirname [info script]]/] end] :]
+    if {[string index $::request(PATH_INFO) end] == "/"} {
+        append ::request(PATH_INFO) index.html
+    }
     set doc [split [file tail $::request(PATH_INFO)] :]
     set cmd [lindex $doc 0]
     set arg [join [lrange $doc 1 end] :]
+    #puts "\"$doc\" \"$cmd\" \"$arg\""
  
     if {$::request(REQUEST_METHOD) == "GET"} {
         switch -exact -- $cmd {
