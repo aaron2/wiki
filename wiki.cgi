@@ -1,4 +1,4 @@
-#!/usr/local/bin/tclsh8.5
+#!/usr/bin/tclsh
 
 #set TimeProfilerMode 1
 if {[info exists TimeProfilerMode]} {
@@ -182,6 +182,8 @@ proc editnode {id args} {
         set level $::settings(DEFAULT_LEVEL)
     } else {
         db eval {select name,content,level from nodes where id=$id} {}
+        if {[llength $args] > 0} { set name [lindex $args 0] }
+        if {[llength $args] > 1} { set content [lindex $args 1] }
         if {![info exists name]} { http_error 404 "no such node" }
         if {![authorized node edit $id]} { no_auth }
         http_header
@@ -315,23 +317,36 @@ proc saveconfig {} {
 # returns: html
 proc tzselect {sel} {
     set ignore {US Antarctica Eire PRC Libya Kwajalein ROC ROK GB GB-Eire NZ NZ-CHAT CET CST6CDT Etc EET EST EST5EDT GMT GMT+0 GMT-0 GMT0 Greenwich HST MET MST MST7MDT PST8PDT SystemV UCT Universal W-SU WET Zulu}
+set ignore ""
     set out [list "<select name=TZ>"]
-    foreach x [lsort [glob -nocomplain -tails -dir $::tcl_library/tzdata/ *]] {
-        if {[lsearch -exact $ignore $x] > -1} continue
-        if {[file isdirectory $::tcl_library/tzdata/$x]} {
-            foreach y [lsort [glob -nocomplain -tails -dir $::tcl_library/tzdata/$x *]] {
-                set opt "<option value=\"$x/$y\""
-                if {"$x/$y" == $sel} { append opt " selected" }
-                append opt ">$x/$y"
-                lappend out $opt
-            }
-        } else {
-            set opt "<option value=\"$x\""
-            if {$x == $sel} { append opt " selected" }
-            append opt ">$x"
-            lappend out $opt
-        }
+    set zonetab "/usr/share/zoneinfo/zone.tab";
+    set fh [open $zonetab]
+    foreach line [split [read $fh] \n] {
+        set line [split $line \t]
+        set tz [lindex $line 2]
+        if {[lsearch -exact $ignore $tz] > -1} continue
+        set opt "<option value=\"$tz\""
+        if {"$tz" == $sel} { append opt " selected" }
+        append opt ">$tz"
+        lappend out $opt
     }
+    close $fh
+#    foreach x [lsort [glob -nocomplain -tails -dir $::tcl_library/tzdata/ *]] {
+#        if {[lsearch -exact $ignore $x] > -1} continue
+#        if {[file isdirectory $::tcl_library/tzdata/$x]} {
+#            foreach y [lsort [glob -nocomplain -tails -dir $::tcl_library/tzdata/$x *]] {
+#                set opt "<option value=\"$x/$y\""
+#                if {"$x/$y" == $sel} { append opt " selected" }
+#                append opt ">$x/$y"
+#                lappend out $opt
+#            }
+#        } else {
+#            set opt "<option value=\"$x\""
+#            if {$x == $sel} { append opt " selected" }
+#            append opt ">$x"
+#            lappend out $opt
+#        }
+#    }
     if {[llength $out] == 1} { lappend out "<option value=UTC>UTC" }
     lappend out "</select>"
     return [join $out \n]
@@ -385,6 +400,7 @@ proc hash_pass {pass {salt {}}} {
 # input: form postdata
 # returns: nothing
 proc saveprefs {} {
+    global cookies
     get_post input
     if {[info exists input(password)] && $input(password) != "" && [info exists input(user)] && $input(user) != ""} {
         if {![authorized user password $input(user)]} { no_auth }
@@ -397,6 +413,8 @@ proc saveprefs {} {
             set hash [lindex $h 0]
             set salt [lindex $h 1]
             db eval {update users set password=$hash, salt=$salt where user=$user}
+            set curkey $cookies(AUTH)
+            db eval {delete from cookies where user=$user and key<>$curkey}
             db eval {commit transaction}
         }
     }
@@ -405,7 +423,7 @@ proc saveprefs {} {
         if {[info exists input($x)]} {
             set input($x) [string trim $input($x)]
             if {$x == "TZ" && [catch {clock format [clock seconds] -timezone $input($x)} err]} {
-                lappend status "Invalid timezone"
+            #    lappend status "Invalid timezone"
                 continue
             }
             # escape the % since the cookie will be decoded on reciept, and spaces arent allowed in values
@@ -810,13 +828,28 @@ proc logout {} {
     location wiki:login
 }
 
+proc reset {} {
+    http_header
+    html_head "Login"
+    get_input input
+    set user ""
+
+    if {![info exists input(key)]} {
+    }
+
+    set page [db onecolumn {select user from users where reset=}]
+}
+
 # show the login request page
 # input: optional query string "message"
 # returns: nothing
 proc login {} {
+    get_input input
+    if {$::request(USER_AUTH) && [info exists input(href)]} {
+        location $input(href)
+    }
     http_header
     html_head "Login"
-    get_input input
     set user ""
 
     if {[info exists input(message)]} {
@@ -969,6 +1002,11 @@ proc link {to text} {
     return "<a href=\"./$to\">$text</a>"
 }
 
+proc filelink {to text} {
+            return "<a href=\"files/$filename\" class=filelink>$name</a> <span class=fileinfo>([link file:$data info])</span>"
+    return "<a href=\"./files$to\">$text</a>"
+}
+
 proc showhistory {nodeid} {
     if {![authorized node view $nodeid]} { no_auth }
     if {[string match *:* $nodeid]} {
@@ -1119,10 +1157,14 @@ proc deletefile {id} {
 }
 
 proc showfile {id} {
-    db eval {select name,filename,original_name,tf(created) as created,tf(modified) as modified from files where id=$id} {}
+    db eval {select files.name,files.filename,files.original_name,tf(files.created) as created,tf(files.modified) as modified,group_concat(filetags.name) as tags from files left outer join (select name from filetags where file=$id) as filetags where files.id=$id} {}
     if {![info exists name]} { http_error 404 "no such file" }
     http_header
-    html_head "File Information: $name"
+    html_head "File Information: $name" {
+        <script src="include/jquery-1.4.3.min.js"></script>
+<script src="include/jquery.tagsinput.js"></script>
+<link rel="stylesheet" type="text/css" href="include/jquery.tagsinput.css" />
+    }
     lappend ::auto_path packages
     puts "<script type=\"text/javascript\">
         function confirmation() {
@@ -1149,6 +1191,7 @@ proc showfile {id} {
     puts "<h1>File Information: $name</h1><br><br>
          <form method='POST' enctype='multipart/form-data' action='./upload:$id'>
          <table><tr><td>Name:</td><td><input type=text name=name value=\"$name\" size=60></td></tr>
+         <tr><td>Tags:</td><td><input name=\"tags\" id=\"tags\" value=\"$tags\" /></td></tr>
          <tr><td>Filename:</td><td><a href=\"files/$filename\">$filename</a></td></tr>
          <tr><td>Original name:</td><td>$original_name</td></tr>
          <tr><td>Created:</td><td>$created</td></tr>
@@ -1166,6 +1209,15 @@ proc showfile {id} {
     if {![info exists name]} { puts "None<br>" }
     if {[regexp -nocase {\.(jpe?g|bmp|png|gif)$} $filename]} {
         puts "<br><br><center><img src=\"files/$filename\"></center>"
+    }
+    puts {
+<script>
+$('#tags').tagsInput({
+   'height':'',
+   'width':'',
+   'placeholderColor' : '#666666'
+});
+//$('#tags').tagsInput();</script>
     }
 }
 
@@ -1375,12 +1427,33 @@ proc format_filesize {size} {
 proc upload {} {
     if {![authorized file create]} { no_auth }
     http_header
-    html_head "File upload"
+    get_input input
+    html_head "File upload" {
+        <script src="include/jquery-1.4.3.min.js"></script>
+<script src="include/jquery.tagsinput.js"></script>
+<link rel="stylesheet" type="text/css" href="include/jquery.tagsinput.css" />
+}
     puts "<h1>File upload</h1><br><br>"
     puts "<form method='POST' enctype='multipart/form-data' action='./upload:new'>"
     puts "<table><tr><td><table style=\"border: 0px;\"><tr><td style=\"border: 0px;\">File:</td><td style=\"border: 0px;\"><input type=file name=filedata size=60></td></tr>"
-    puts "<tr><td style=\"border: 0px;\">Name:</td><td style=\"border: 0px;\"><input type=text name=name size=60></td></tr></table></td></tr><tr><td colspan=2 align=center>"
-puts "<input type=submit value=Upload></td></tr></table></form>"
+    puts "<tr><td style=\"border: 0px;\">Name:</td><td style=\"border: 0px;\"><input type=text name=name size=60></td></tr>"
+    puts "<tr><td style=\"border: 0px;\">Tags:</td><td style=\"border: 0px;\"><input name=\"tags\" id=\"tags\" /></td></tr>"
+    if {[info exists input(from)] && [string is integer -strict $input(from)]} {
+        set from $input(from)
+        set name [db onecolumn {select name from nodes where id=$from}]
+        puts "<tr><td style=\"border: 0px\" colspan=2>Attach to &quot;$name&quot; <input type=checkbox name=attach_$from></td></tr>"
+    }
+    puts "</table></td></tr><tr><td colspan=2 align=center>"
+    puts "<input type=submit value=Upload></td></tr></table></form>"
+    puts {
+<script>
+$('#tags').tagsInput({
+   'height':'',
+   'width':'',
+   'placeholderColor' : '#666666'
+});
+</script>
+}
 }
 
 # handles the post of the file upload page
@@ -1409,9 +1482,13 @@ proc upload_post {id} {
             regexp {name=\"(.*?)\"} $header -> nameval
             if {$nameval == "name"} {
                 set name [string trim $content]
+            } elseif {$nameval == "tags"} {
+                set tags [string trim $content]
             } elseif {$nameval == "filedata"} {
                 set filedata $content
                 regexp {filename=\"(.*?)\"} $header -> original
+            } elseif {[string match attach_* $nameval] && [string tolower [string trim $content]] == "on"} {
+                set attach [string range $nameval 7 end]
             }
         }
     }
@@ -1427,9 +1504,15 @@ proc upload_post {id} {
         if {$name == ""} { set name [file rootname $tail] }
         set base [filepath]
         set tail [string map {" " _} $tail]
-        set magic [expr {int(rand()*pow(10, 8))}]
-        while {[file exists [set filename [format "%s/%d_%s" $base $magic $tail]]]} { set magic [expr {int(rand()*pow(10, 8))}] }
+        set magic [magic]
+        while {[file exists [set filename [format "%s/%d_%s" $base $magic $tail]]]} { set magic [magic] }
     } else {
+        if {[info exists tags]} {
+            db eval {delete from filetags where file=$id}
+            foreach tag [split $tags ,] {
+                db eval {insert or ignore into filetags (name,file) values(lower($tag),$id)}
+            }
+        }
         # if its not new and there was no file, just update the name
         if {$filedata == ""} {
             db eval {update files set name=$name where id=$id}
@@ -1451,12 +1534,37 @@ proc upload_post {id} {
         set filename [file tail $filename]
         db eval {insert into files (name,original_name,filename,created,created_by,modified,modified_by) values($name,$original,$filename,datetime('now'),$user,datetime('now'),$user)}
         db eval {commit transaction}
-        location file:[db last_insert_rowid]
+        set id [db last_insert_rowid]
+        if {[info exists tags]} {
+            foreach tag [split $tags ,] {
+                db eval {insert or ignore into filetags (name,file) values(lower($tag),$id)}
+            }
+        }
     } else {
         db eval {update files set modified=datetime('now'),modified_by=$user,name=$name where id=$id}
         db eval {commit transaction}
+    }
+
+    if {[info exists attach]} {
+        db eval {select name,content from nodes where id=$attach} {}
+        if {![info exists name]} {
+            location file:$id
+            return
+        }
+        editnode $attach $name "$content\nfile:$id"
+    } else {
         location file:$id
     }
+}
+
+proc magic {{nchars 30}} {
+    set chars abcdefghijklmnopqrstuvwxyz0123456789
+    set len [string length $chars]
+    set out ""
+    while {[string length $out] < $nchars} {
+        append out [string index $chars [expr {int(rand()*$len)}]]
+    }
+    return $out
 }
 
 proc http_header {args} {
@@ -1872,9 +1980,7 @@ proc static_call {id cmd data} {
             db eval {insert or ignore into links (node,type,target) values($id,'file',$imgid)}
 
             if {[info exists tns]} {
-                set tns [string map {icon 32x32 small 100x100 med 200x200 medium 200x200 large 640x480} $tns]
-                set thumb [thumbnail $tns $filename]
-                return "<a href=\"files/$filename\"><img src=\"$thumb\" alt=\"$name\" /></a>"
+                return "<a href=\"files/$filename\"><img src=\"[thumbnail $tns $filename]\" alt=\"$name\" /></a>"
             }
             return "<img src=\"files/$filename\" alt=\"$name\" />"
         }
@@ -1883,7 +1989,7 @@ proc static_call {id cmd data} {
         }
         wiki {
            if {$data == "searchembed"} {
-               return "<form name=search method=post action=search><input name=string> <input type=submit value=Search>"
+               return "<form name=search method=post action=search><input name=string><input type=submit value=Search></form>"
            }
            if {$data == "uploadembed"} {
                return "<form method='POST' enctype='multipart/form-data' action='./upload:new'>
@@ -1901,6 +2007,7 @@ proc static_call {id cmd data} {
 }
 
 proc thumbnail {size file} {
+    set size [string map {icon 32x32 small 100x100 med 200x200 medium 200x200 large 640x480} $size]
     set thumb [file rootname $file]_$size[file extension $file]
     set out [filepath]/thumbs/$thumb
     set path files/thumbs/$thumb
@@ -1915,6 +2022,10 @@ proc thumbnail {size file} {
 
 proc filepath {{file {}}} {
     set path [join [lrange [split $::request(PATH_TRANSLATED) /] 0 end-1] /]/files
+    if {![file isdirectory $path]} {
+        # are we in a chroot or something? try script path
+        set path [join [lrange [split $::request(SCRIPT_FILENAME) /] 0 end-1] /]/files
+    }
     if {$file != ""} { append path /$file }
     return $path
 }
@@ -1977,7 +2088,7 @@ proc procwrapper {i name myargs body} {
 }
 
 proc db_auth {action table col db view} {
-    if {$action == "SQLITE_READ" && ($view != "pages" && $table != "pages" && $table != "tags" && $table != "links" && $table != "files")} {
+    if {$action == "SQLITE_READ" && ($view != "pages" && $table != "pages" && $table != "tags" && $table != "links" && $table != "files" && $table != "filetags")} {
         #puts "DENY $action $table $col $db $view<br>"
         return SQLITE_DENY
     }
@@ -1990,7 +2101,7 @@ proc setup_interp {} {
     interp alias $i file {} filewrapper
     interp alias $i sql {} interp invokehidden $i db eval
     interp alias $i puts {} append output
-    foreach x {link format_filesize get_input strip_html filter_html unescape format_time db_auth table} {
+    foreach x {link format_filesize get_input strip_html filter_html unescape format_time db_auth table thumbnail} {
         interp alias $i $x {} $x
     }
     set level_idx [lindex $::request(USER_LEVEL) 0]
@@ -2164,6 +2275,7 @@ proc savepage {id} {
         if {!$::request(USER_AUTH) && ![verify_captcha input] } { http_error 403 Forbidden }
         if {![info exists input(level)] || ![string match {0[0123]???} $input(level)]} { set input(level) $level }
         if {$input(content) == $content} {
+            set input(name) [string trim $input(name)]
             db eval {update nodes set name=$input(name),level=$input(level) where id=$id}
             db eval {commit transaction}
             set strip "$input(name) [striphtml [db onecolumn {select parsed from nodes where id=$id}]]"
@@ -2202,6 +2314,7 @@ proc savepage {id} {
 
     set user "$::request(USER)@$::request(REMOTE_ADDR)"
 
+    set input(name) [string trim $input(name)]
     if {$new} {
         db eval {update nodes set parsed=$parsed,modified=datetime('now'),created=datetime('now'),modified_by=$user where id=$id}
         fts eval {insert into search (id,name,level,content) values($id,$input(name),$input(level),$strip)}
@@ -2258,6 +2371,7 @@ proc showlinks {id} {
 }
 
 proc open_databases {dir} {
+lappend ::auto_path /var/chroot/home/content/93/8173693/lib/tcl8.5
     package require sqlite3
     sqlite3 db [file join $dir wiki.db]
     sqlite3 fts [file join $dir fts.db]
@@ -2313,6 +2427,7 @@ proc service_request {} {
                     users { userlist }
                     login { login }
                     logout { logout }
+                    reset { reset }
                     default { wikitag $arg }
                 }
             }
@@ -2338,17 +2453,25 @@ proc service_request {} {
 #parray env
 #exit
 
-set t [time {
+#catch {
+#set t [time {
 
 if {[info exists env(GATEWAY_INTERFACE)]} {
     open_databases [pwd]
     array set request [array get env]
+#set request(PATH_INFO) [string range $request(PATH_INFO) [string length /~ligh6687/crack] end]
+if {$request(PATH_INFO) == ""} { set request(PATH_INFO) / }
+#puts "Content-type: text/plain\n"
+#parray request
+#exit
     service_request
 
     if {[info exists TimeProfilerMode]} { TimeProfilerDump description }
 }
 
-}]
+#}]
+#} err
+#puts $err
 
-set t [lindex $t 0]
+#set t [lindex $t 0]
 #exec echo [file tail $::env(PATH_TRANSLATED)] [expr {double($t) / 1000}] >> log
