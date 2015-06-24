@@ -28,6 +28,13 @@ primary key(name,node),
 foreign key (node) references nodes (id)
 );
 
+CREATE TABLE filetags (
+name varchar not null,
+file integer not null,
+primary key(name,file),
+foreign key (file) references files (id)
+);
+
 CREATE TABLE history (
 id integer primary key autoincrement,
 original integer not null,
